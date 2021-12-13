@@ -34,22 +34,6 @@ pub struct Args {
     gfa_path: String,
 }
 
-// pub enum WorldNode {
-//     Left(NodeId),
-//     Right(NodeId),
-// }
-
-#[derive(Clone)]
-pub struct Chain {
-    left: Handle,
-    right: Handle,
-
-    contained_nodes: FxHashSet<NodeId>,
-
-    length: usize,
-    // children: Vec<Arc<Mutex<Option<Chain>>>>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathRange {
     path: PathId,
@@ -160,6 +144,98 @@ pub fn len_to_pos(l: usize) -> f32 {
     (l as f32) / (BP_PER_UNIT as f32)
 }
 
+pub struct Layout3D {
+    vertices: Vec<na::Vec3>,
+    // links: Vec<(usize, usize)>,
+    link_map: FxHashMap<usize, usize>,
+
+    // each node is represented by a sequence of vertices
+    node_vx_map: FxHashMap<NodeId, std::ops::Range<usize>>,
+
+    top_level: Chain,
+
+    chain_vx_map: FxHashMap<(PathId, StepPtr, StepPtr), std::ops::Range<usize>>,
+}
+
+impl Layout3D {
+    /// Start a layout using a single path as the spine
+    pub fn from_path(graph: &PackedGraph, path: PathId) -> Option<Self> {
+        let mut steps = graph.path_steps(path)?;
+
+        let first = steps.next()?;
+
+        let h0 = first.handle();
+
+        let node_len = graph.node_len(h0);
+        let start = na::vec3(0.0, 0.0, 0.0);
+
+        let end = na::vec3(len_to_pos(node_len), 0.0, 0.0);
+
+        /*
+        let mut chain = VecChain {
+            // vertices: vec![start, end],
+            // links: vec![(0, 1)],
+            vertices: vec![start],
+            links: vec![],
+            start,
+            end: start,
+        };
+
+        for step in steps {
+            let h = step.handle();
+            // let node = step.handle().id();
+            let node_len = graph.node_len(h);
+            chain.append_node(node_len);
+            // append_node(step.handle().id());
+        }
+
+        Some(chain)
+        */
+        unimplemented!();
+    }
+}
+
+pub struct ChainA {
+    path: PathId,
+    start: StepPtr,
+    end: StepPtr,
+
+    steps: Vec<Handle>,
+    // children: Vec<ChainA>,
+}
+
+pub struct ChainAtom {
+    path: PathId,
+    start: StepPtr,
+    end: StepPtr,
+
+    nodes: Vec<NodeId>,
+}
+
+#[derive(Clone)]
+pub struct Chain {
+    // vx_range: std::ops::Range<usize>,
+    path: PathId,
+    start: StepPtr,
+    end: StepPtr,
+
+    // start_h: Handle,
+    // end_h: Handle,
+    nodes: Vec<NodeId>,
+
+    children: FxHashMap<(usize, usize), Chain>,
+}
+
+// #[derive(Clone)]
+// pub enum ChainIx {
+//     NodeIx(usize),
+//     Child((usize, usize), Box<ChainIx>),
+// }
+
+// pub struct ChainIx {
+//     crumbs: Vec<
+// }
+
 pub struct VecChain {
     vertices: Vec<na::Vec3>,
     links: Vec<(usize, usize)>,
@@ -220,12 +296,17 @@ impl VecChain {
             end: start,
         };
 
+        let mut added_nodes: FxHashSet<NodeId> = FxHashSet::default();
+
         for step in steps {
             let h = step.handle();
-            // let node = step.handle().id();
+            let node = step.handle().id();
+            if !added_nodes.insert(node) {
+                continue;
+            }
+
             let node_len = graph.node_len(h);
             chain.append_node(node_len);
-            // append_node(step.handle().id());
         }
 
         Some(chain)
@@ -291,6 +372,76 @@ fn main() {
     // let mut layout = Layout::from_graph(&graph);
 
     // let mut node_pos: FxHashMap<NodeId, (Vec2, Vec2)> = FxHashMap::default();
+}
+
+pub struct PathChains {
+    path: PathId,
+    remaining: Vec<Vec<(Handle, StepPtr, usize)>>,
+}
+
+impl PathChains {
+    pub fn from_path(
+        graph: &PackedGraph,
+        path_pos: &PathPositionMap,
+        path: PathId,
+    ) -> Option<Self> {
+        let steps = path_pos_steps(graph, path_pos, path)?;
+
+        let mut remaining = Vec::new();
+
+        for (h, step_ix, pos) in steps {
+            remaining.push((h, step_ix, pos));
+        }
+
+        let remaining = vec![remaining];
+
+        Some(Self { path, remaining })
+    }
+
+    pub fn delete_nodes(&mut self, nodes: &[NodeId]) {
+        let mut to_keep: FxHashMap<usize, Vec<std::ops::Range<usize>>> = FxHashMap::default();
+
+        for (ix, chain) in self.remaining.iter().enumerate() {
+            let mut ranges_to_keep: Vec<std::ops::Range<usize>> = Vec::new();
+            let mut to_keep_start: Option<usize> = None;
+            let mut prev_ix: Option<usize> = None;
+
+            for (ix, (h, _, _)) in chain.iter().enumerate() {
+                if nodes.contains(&h.id()) {
+                    if let Some(start) = to_keep_start {
+                        if let Some(prev) = prev_ix {
+                            ranges_to_keep.push(start..prev);
+                            to_keep_start = None;
+                        } else {
+                            unreachable!();
+                        }
+                    } //else {
+                      // }
+                } else {
+                    if to_keep_start.is_none() {
+                        to_keep_start = Some(ix);
+                    }
+                }
+
+                prev_ix = Some(ix);
+            }
+
+            to_keep.insert(ix, ranges_to_keep);
+        }
+
+        let mut new_remaining: Vec<Vec<(Handle, StepPtr, usize)>> = Vec::new();
+
+        for (ix, ranges) in to_keep {
+            let chain = &self.remaining[ix];
+
+            for range in ranges {
+                let new_chain = Vec::from_iter(chain[range].iter().copied());
+                new_remaining.push(new_chain);
+            }
+        }
+
+        self.remaining = new_remaining;
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -399,4 +550,25 @@ impl Path1DLayout {
             node_offsets,
         }
     }
+}
+
+pub fn path_pos_steps(
+    graph: &PackedGraph,
+    path_pos: &PathPositionMap,
+    path_id: PathId,
+) -> Option<Vec<(Handle, StepPtr, usize)>> {
+    let path_steps = graph.path_steps(path_id)?;
+
+    let mut result = Vec::new();
+
+    for step in path_steps {
+        let step_ptr = step.0;
+        let handle = step.handle();
+
+        let base_pos = path_pos.path_step_position(path_id, step_ptr)?;
+
+        result.push((handle, step_ptr, base_pos));
+    }
+
+    Some(result)
 }

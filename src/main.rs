@@ -344,42 +344,74 @@ fn main() {
     let chain = VecChain::from_path(&graph, longest_path).unwrap();
 
     chain.print_obj();
+}
 
-    /*
-    let mut used_nodes: FxHashSet<NodeId> = FxHashSet::default();
+pub struct ChainMap {
+    remaining: FxHashMap<PathId, PathChains>,
+}
 
-    let mut remaining_len = graph.total_length();
+impl ChainMap {
+    pub fn new(graph: &PackedGraph, path_pos: &PathPositionMap) -> Self {
+        let mut remaining = FxHashMap::default();
 
-    let steps = graph.path_steps(longest_path).unwrap();
+        for path in graph.path_ids() {
+            let chains = PathChains::from_path(graph, path_pos, path).unwrap();
+            remaining.insert(path, chains);
+        }
 
-    // let mut
-
-    for step in steps {
-        let h = step.handle();
-        let node = step.handle().id();
-
-        let node_len = graph.node_len(h);
-
-        used_nodes.insert(node);
-        remaining_len -= node_len;
-        // append_node(step.handle().id());
+        Self { remaining }
     }
 
-    println!("total     len: {}", graph.total_length());
-    println!("remaining len: {}", remaining_len);
-    */
+    pub fn remove_path(&mut self, path: PathId) {
+        self.remaining.remove(&path);
+    }
 
-    // let mut layout = Layout::from_graph(&graph);
+    // the (PathId, usize) tuple is the index (path + chain index)
+    pub fn by_longest(
+        &self,
+        graph: &PackedGraph,
+    ) -> Vec<((PathId, usize), usize)> {
+        let mut all_chains: Vec<_> = self
+            .remaining
+            .iter()
+            .flat_map(|(path, chains)| {
+                chains.lengths(graph).map(|(ix, len)| ((*path, ix), len))
+            })
+            .collect();
 
-    // let mut node_pos: FxHashMap<NodeId, (Vec2, Vec2)> = FxHashMap::default();
+        all_chains.sort_by_key(|(_, l)| *l);
+        all_chains
+    }
 }
 
 pub struct PathChains {
-    path: PathId,
     remaining: Vec<Vec<(Handle, StepPtr, usize)>>,
 }
 
 impl PathChains {
+    pub fn lengths<'a>(
+        &'a self,
+        graph: &'a PackedGraph,
+    ) -> impl Iterator<Item = (usize, usize)> + 'a {
+        self.remaining.iter().enumerate().map(|(ix, chain)| {
+            (ix, chain.iter().map(|(h, _, _)| graph.node_len(*h)).sum())
+        })
+    }
+
+    pub fn length_order(&self, graph: &PackedGraph) -> Vec<(usize, usize)> {
+        let mut res: Vec<(usize, usize)> = self
+            .remaining
+            .iter()
+            .enumerate()
+            .map(|(ix, chain)| {
+                (ix, chain.iter().map(|(h, _, _)| graph.node_len(*h)).sum())
+            })
+            .collect::<Vec<_>>();
+
+        res.sort_by_key(|(_, l)| *l);
+        res
+    }
+
     pub fn from_path(
         graph: &PackedGraph,
         path_pos: &PathPositionMap,
@@ -395,11 +427,12 @@ impl PathChains {
 
         let remaining = vec![remaining];
 
-        Some(Self { path, remaining })
+        Some(Self { remaining })
     }
 
     pub fn delete_nodes(&mut self, nodes: &[NodeId]) {
-        let mut to_keep: FxHashMap<usize, Vec<std::ops::Range<usize>>> = FxHashMap::default();
+        let mut to_keep: FxHashMap<usize, Vec<std::ops::Range<usize>>> =
+            FxHashMap::default();
 
         for (ix, chain) in self.remaining.iter().enumerate() {
             let mut ranges_to_keep: Vec<std::ops::Range<usize>> = Vec::new();
@@ -483,7 +516,8 @@ impl Path1DLayout {
         let path_count = graph.path_count();
 
         let mut open_ranges: Vec<Option<usize>> = vec![None; path_count];
-        let mut path_ranges: Vec<Vec<std::ops::Range<usize>>> = vec![Vec::new(); path_count];
+        let mut path_ranges: Vec<Vec<std::ops::Range<usize>>> =
+            vec![Vec::new(); path_count];
         let mut total_len = 0usize;
         let mut paths_on_handle = FxHashSet::default();
         let mut node_offsets = Vec::with_capacity(nodes.len());
@@ -538,11 +572,12 @@ impl Path1DLayout {
             }
         }
 
-        let path_ranges: FxHashMap<PathId, Vec<std::ops::Range<usize>>> = path_ranges
-            .into_iter()
-            .enumerate()
-            .map(|(ix, ranges)| (PathId(ix as u64), ranges))
-            .collect();
+        let path_ranges: FxHashMap<PathId, Vec<std::ops::Range<usize>>> =
+            path_ranges
+                .into_iter()
+                .enumerate()
+                .map(|(ix, ranges)| (PathId(ix as u64), ranges))
+                .collect();
 
         Self {
             total_len,

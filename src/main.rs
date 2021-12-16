@@ -14,7 +14,7 @@ use handlegraph::{
 };
 
 use crossbeam::channel;
-use na::{right_handed, Vec2, Vec3};
+use na::{Vec2, Vec3};
 use parking_lot::Mutex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -65,66 +65,6 @@ impl PathRange {
     // pub fn remove_
 }
 
-#[derive(Default, Clone)]
-pub struct Layout {
-    path_1d: Path1DLayout,
-
-    nodes: Vec<(Vec3, Vec3)>,
-
-    vertices: Vec<Vec3>,
-    links: Vec<usize>,
-}
-
-impl Layout {
-    // pub fn from_gfa<T: OptFields>(gfa: &GFA<usize, T>) -> Self {
-    pub fn from_graph(graph: &PackedGraph) -> Self {
-        let layout_1d = Path1DLayout::new(graph);
-
-        let zero: Vec3 = na::vec3(0.0, 0.0, 0.0);
-
-        // graph.path_handle_at_step(id, index)
-
-        let longest_path = graph
-            .path_ids()
-            .max_by_key(|path| layout_1d.path_len(*path).unwrap_or(0))
-            .unwrap();
-
-        let mut covered: FxHashSet<(usize, usize)> = FxHashSet::default();
-
-        let mut x: f32 = 0.0;
-
-        let scale = 10.0;
-        let padding = 1.0;
-
-        let mut nodes = vec![(zero, zero); graph.node_count()];
-
-        {
-            let mut append_node = |id: NodeId| {
-                let ranges = layout_1d.path_ranges.get(&longest_path).unwrap();
-                let len = graph.node_len(Handle::pack(id, false));
-                let ix = (id.0 - 1) as usize;
-                let x0 = x;
-                let x1 = x + (len as f32) / scale;
-                x = x1 + padding;
-                nodes[ix] = (na::vec3(x0, 0.0, 0.0), na::vec3(x1, 0.0, 0.0));
-            };
-
-            let steps = graph.path_steps(longest_path).unwrap();
-
-            for step in steps {
-                let h = step.handle();
-                let node = step.handle().id();
-                // append_node(step.handle().id());
-            }
-        }
-
-        unimplemented!();
-    }
-}
-
-// pub struct NodePositions {
-// }
-
 #[derive(Debug, Default, Clone)]
 pub struct Obj {
     vertices: Vec<(f32, f32)>,
@@ -171,45 +111,8 @@ impl Layout3D {
 
         let end = na::vec3(len_to_pos(node_len), 0.0, 0.0);
 
-        /*
-        let mut chain = VecChain {
-            // vertices: vec![start, end],
-            // links: vec![(0, 1)],
-            vertices: vec![start],
-            links: vec![],
-            start,
-            end: start,
-        };
-
-        for step in steps {
-            let h = step.handle();
-            // let node = step.handle().id();
-            let node_len = graph.node_len(h);
-            chain.append_node(node_len);
-            // append_node(step.handle().id());
-        }
-
-        Some(chain)
-        */
         unimplemented!();
     }
-}
-
-pub struct ChainA {
-    path: PathId,
-    start: StepPtr,
-    end: StepPtr,
-
-    steps: Vec<Handle>,
-    // children: Vec<ChainA>,
-}
-
-pub struct ChainAtom {
-    path: PathId,
-    start: StepPtr,
-    end: StepPtr,
-
-    nodes: Vec<NodeId>,
 }
 
 #[derive(Clone)]
@@ -225,16 +128,6 @@ pub struct Chain {
 
     children: FxHashMap<(usize, usize), Chain>,
 }
-
-// #[derive(Clone)]
-// pub enum ChainIx {
-//     NodeIx(usize),
-//     Child((usize, usize), Box<ChainIx>),
-// }
-
-// pub struct ChainIx {
-//     crumbs: Vec<
-// }
 
 pub struct VecChain {
     vertices: Vec<na::Vec3>,
@@ -362,8 +255,21 @@ impl ChainMap {
         Self { remaining }
     }
 
-    pub fn remove_path(&mut self, path: PathId) {
-        self.remaining.remove(&path);
+    pub fn remove_path(&mut self, path: PathId) -> Option<PathChains> {
+        self.remaining.remove(&path)
+    }
+
+    pub fn by_longest_mut(
+        &self,
+        graph: &PackedGraph,
+        res: &mut Vec<((PathId, usize), usize)>,
+    ) {
+        res.clear();
+        res.extend(self.remaining.iter().flat_map(|(path, chains)| {
+            chains.lengths(graph).map(|(ix, len)| ((*path, ix), len))
+        }));
+
+        res.sort_by_key(|(_, l)| *l);
     }
 
     // the (PathId, usize) tuple is the index (path + chain index)
@@ -371,15 +277,8 @@ impl ChainMap {
         &self,
         graph: &PackedGraph,
     ) -> Vec<((PathId, usize), usize)> {
-        let mut all_chains: Vec<_> = self
-            .remaining
-            .iter()
-            .flat_map(|(path, chains)| {
-                chains.lengths(graph).map(|(ix, len)| ((*path, ix), len))
-            })
-            .collect();
-
-        all_chains.sort_by_key(|(_, l)| *l);
+        let mut all_chains = Vec::new();
+        self.by_longest_mut(graph, &mut all_chains);
         all_chains
     }
 }

@@ -309,6 +309,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argh",
+ "bstr",
  "colorous",
  "crossbeam",
  "flexi_logger",

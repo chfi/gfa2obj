@@ -34,5 +34,7 @@ colorous = "1.0.5"
 nalgebra = "0.24"
 nalgebra-glm = "0.10"
 
+bstr = "0.2"
+
 # rhai = { version = "1.0.1", features = ["sync", "f32_float", "metadata", "internals"] }
 # bytemuck = { version = "1.7", features = ["derive"] }

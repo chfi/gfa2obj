@@ -26,6 +26,8 @@ use argh::FromArgs;
 // use nalgebra as na;
 use nalgebra_glm as na;
 
+use bstr::ByteSlice;
+
 #[derive(Debug, FromArgs)]
 /// gfa2obj
 pub struct Args {
@@ -84,6 +86,7 @@ pub fn len_to_pos(l: usize) -> f32 {
     (l as f32) / (BP_PER_UNIT as f32)
 }
 
+/*
 pub struct Layout3D {
     vertices: Vec<na::Vec3>,
     // links: Vec<(usize, usize)>,
@@ -98,6 +101,7 @@ pub struct Layout3D {
 }
 
 impl Layout3D {
+
     /// Start a layout using a single path as the spine
     pub fn from_path(graph: &PackedGraph, path: PathId) -> Option<Self> {
         let mut steps = graph.path_steps(path)?;
@@ -114,6 +118,7 @@ impl Layout3D {
         unimplemented!();
     }
 }
+*/
 
 #[derive(Clone)]
 pub struct Chain {
@@ -234,9 +239,98 @@ fn main() {
         .max_by_key(|path| layout_1d.path_len(*path).unwrap_or(0))
         .unwrap();
 
-    let chain = VecChain::from_path(&graph, longest_path).unwrap();
+    let path_name = graph.get_path_name_vec(longest_path).unwrap();
 
-    chain.print_obj();
+    println!("using longest path: {}", path_name.as_bstr());
+
+    let mut chain_map = ChainMap::new(&graph, &path_pos);
+    let longest_chain = chain_map
+        .remove_path(longest_path)
+        .unwrap()
+        .remaining
+        .remove(0);
+
+    let mut remaining_nodes =
+        graph.handles().map(|h| h.id()).collect::<FxHashSet<_>>();
+
+    for h in longest_chain.iter() {
+        remaining_nodes.remove(&h.id());
+    }
+
+    let mut chains: Vec<Vec<Handle>> = vec![longest_chain];
+
+    //     let n = h.id();
+    // })
+
+    let mut running = true;
+
+    let mut chains_by_len = chain_map.by_longest(&graph);
+
+    let mut cur_nodes = Vec::new();
+
+    let mut count = 0;
+
+    while running {
+        let node_count = remaining_nodes.len();
+        println!("{}", count);
+
+        let mut delete_nodes = false;
+
+        if let Some(((path, chain_ix), len)) = chains_by_len.first() {
+            println!("removing chain with length {}", len);
+            if let Some(chain) = chain_map.remaining.get_mut(path) {
+                if let Some(chain) = chain.remaining.get(*chain_ix) {
+                    cur_nodes.clear();
+                    cur_nodes.extend(chain.iter().map(|h| h.id()));
+
+                    println!("gathered {} nodes to remove", cur_nodes.len());
+                    for node in cur_nodes.iter() {
+                        remaining_nodes.remove(node);
+                    }
+                }
+
+                delete_nodes = true;
+                // remove_head = true;
+            }
+            // let nodes = longest.
+        } else {
+            println!("no remaining chains");
+            // running = false;
+            break;
+        }
+
+        if delete_nodes {
+            for (path_id, chains) in chain_map.remaining.iter_mut() {
+                chains.delete_nodes(&cur_nodes);
+            }
+        }
+
+        count += 1;
+
+        chain_map.by_longest_mut(&graph, &mut chains_by_len);
+        println!("  - nodes left {}", node_count);
+    }
+
+    let node_count = remaining_nodes.len();
+    println!("leftover node count {}", node_count);
+
+    let mut len_map: FxHashMap<usize, usize> = FxHashMap::default();
+
+    for node in remaining_nodes {
+        let len = graph.node_len(Handle::pack(node, false));
+        *len_map.entry(len).or_default() += 1;
+
+        if len > 100 {
+            println!("node {} is long", node.0);
+        }
+    }
+
+    let mut keys = len_map.keys().collect::<Vec<_>>();
+    keys.sort();
+
+    for key in keys {
+        println!("{} - {}", key, len_map.get(&key).unwrap());
+    }
 }
 
 pub struct ChainMap {
@@ -284,7 +378,7 @@ impl ChainMap {
 }
 
 pub struct PathChains {
-    remaining: Vec<Vec<(Handle, StepPtr, usize)>>,
+    remaining: Vec<Vec<Handle>>,
 }
 
 impl PathChains {
@@ -293,7 +387,7 @@ impl PathChains {
         graph: &'a PackedGraph,
     ) -> impl Iterator<Item = (usize, usize)> + 'a {
         self.remaining.iter().enumerate().map(|(ix, chain)| {
-            (ix, chain.iter().map(|(h, _, _)| graph.node_len(*h)).sum())
+            (ix, chain.iter().map(|h| graph.node_len(*h)).sum())
         })
     }
 
@@ -303,7 +397,7 @@ impl PathChains {
             .iter()
             .enumerate()
             .map(|(ix, chain)| {
-                (ix, chain.iter().map(|(h, _, _)| graph.node_len(*h)).sum())
+                (ix, chain.iter().map(|h| graph.node_len(*h)).sum())
             })
             .collect::<Vec<_>>();
 
@@ -316,12 +410,15 @@ impl PathChains {
         path_pos: &PathPositionMap,
         path: PathId,
     ) -> Option<Self> {
-        let steps = path_pos_steps(graph, path_pos, path)?;
+        let steps = graph.path_steps(path)?;
+        // let steps = path_pos_steps(graph, path_pos, path)?;
+        // let steps = path_pos_steps(graph, path_pos, path)?;
 
         let mut remaining = Vec::new();
 
-        for (h, step_ix, pos) in steps {
-            remaining.push((h, step_ix, pos));
+        // for (h, step_ix, pos) in steps {
+        for step in steps {
+            remaining.push(step.handle());
         }
 
         let remaining = vec![remaining];
@@ -338,7 +435,7 @@ impl PathChains {
             let mut to_keep_start: Option<usize> = None;
             let mut prev_ix: Option<usize> = None;
 
-            for (ix, (h, _, _)) in chain.iter().enumerate() {
+            for (ix, h) in chain.iter().enumerate() {
                 if nodes.contains(&h.id()) {
                     if let Some(start) = to_keep_start {
                         if let Some(prev) = prev_ix {
@@ -361,7 +458,7 @@ impl PathChains {
             to_keep.insert(ix, ranges_to_keep);
         }
 
-        let mut new_remaining: Vec<Vec<(Handle, StepPtr, usize)>> = Vec::new();
+        let mut new_remaining: Vec<Vec<Handle>> = Vec::new();
 
         for (ix, ranges) in to_keep {
             let chain = &self.remaining[ix];
@@ -486,11 +583,12 @@ impl Path1DLayout {
     }
 }
 
-pub fn path_pos_steps(
+/*
+pub fn path_steps(
     graph: &PackedGraph,
     path_pos: &PathPositionMap,
     path_id: PathId,
-) -> Option<Vec<(Handle, StepPtr, usize)>> {
+) -> Option<Vec<Handle>> {
     let path_steps = graph.path_steps(path_id)?;
 
     let mut result = Vec::new();
@@ -506,3 +604,5 @@ pub fn path_pos_steps(
 
     Some(result)
 }
+
+*/

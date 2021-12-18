@@ -100,11 +100,19 @@ pub struct ChainIx {
     offset: usize,
 }
 
+// item is (&[Handle], &FxHashMap<(Handle, Handle), usize>)
+
+// or maybe... (Option<(Handle, Handle)>, &[Handle]) ????
+// pub struct ChainIter<'a> {
+//     chains: &'a Chains,
+// cur_id:
+// }
+
 #[derive(Default, Clone)]
 pub struct Chains {
     // root is assumed to be index 0
     chains: Vec<Vec<Handle>>,
-    structure: Vec<FxHashMap<(Handle, Handle), usize>>,
+    structure: Vec<FxHashMap<(Handle, Handle), FxHashSet<usize>>>,
 
     inv_map: FxHashMap<Handle, ChainIx>,
 }
@@ -116,6 +124,16 @@ impl Chains {
 
     pub fn is_empty(&self) -> bool {
         self.chains.is_empty()
+    }
+
+    pub fn set_parent(
+        &mut self,
+        parent: usize,
+        range: (Handle, Handle),
+        child: usize,
+    ) {
+        let structure = &mut self.structure[parent];
+        structure.entry(range).or_default().insert(child);
     }
 
     pub fn push_chain(&mut self, in_chain: &[Handle]) -> usize {
@@ -186,6 +204,7 @@ impl Layout3D {
 }
 */
 
+/*
 #[derive(Clone)]
 pub struct Chain {
     // vx_range: std::ops::Range<usize>,
@@ -199,6 +218,7 @@ pub struct Chain {
 
     children: FxHashMap<(usize, usize), Chain>,
 }
+*/
 
 pub struct VecChain {
     vertices: Vec<na::Vec3>,
@@ -497,19 +517,31 @@ impl PathChains {
     }
 
     pub fn delete_nodes(&mut self, nodes: &[NodeId]) {
-        let mut to_keep: FxHashMap<usize, Vec<std::ops::Range<usize>>> =
+        // let mut to_keep: FxHashMap<usize, Vec<std::ops::Range<usize>>> =
+        type ChainRange =
+            (Option<Handle>, Option<Handle>, std::ops::Range<usize>);
+
+        let mut to_keep: FxHashMap<usize, Vec<ChainRange>> =
             FxHashMap::default();
 
         for (ix, chain) in self.remaining.iter().enumerate() {
-            let mut ranges_to_keep: Vec<std::ops::Range<usize>> = Vec::new();
+            let mut ranges_to_keep: Vec<ChainRange> = Vec::new();
             let mut to_keep_start: Option<usize> = None;
             let mut prev_ix: Option<usize> = None;
+
+            let mut left_handle: Option<Handle> = None;
+            let mut cur_handle: Option<Handle> = None;
 
             for (ix, h) in chain.iter().enumerate() {
                 if nodes.contains(&h.id()) {
                     if let Some(start) = to_keep_start {
                         if let Some(prev) = prev_ix {
-                            ranges_to_keep.push(start..prev);
+                            let left = left_handle;
+                            // let left = todo!();
+                            let right = cur_handle;
+                            // let right = todo!();
+                            let range = start..prev;
+                            ranges_to_keep.push((left, right, range));
                             to_keep_start = None;
                         } else {
                             unreachable!();
@@ -533,7 +565,7 @@ impl PathChains {
         for (ix, ranges) in to_keep {
             let chain = &self.remaining[ix];
 
-            for range in ranges {
+            for (left, right, range) in ranges {
                 let new_chain = Vec::from_iter(chain[range].iter().copied());
                 new_remaining.push(new_chain);
             }

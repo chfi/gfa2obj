@@ -86,6 +86,72 @@ pub fn len_to_pos(l: usize) -> f32 {
     (l as f32) / (BP_PER_UNIT as f32)
 }
 
+#[derive(Default, Clone)]
+pub struct Layout3D {
+    handle_vx: FxHashMap<Handle, usize>,
+
+    vertices: Vec<na::Vec3>,
+    links: FxHashMap<usize, usize>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ChainIx {
+    chain_id: usize,
+    offset: usize,
+}
+
+#[derive(Default, Clone)]
+pub struct Chains {
+    // root is assumed to be index 0
+    chains: Vec<Vec<Handle>>,
+    structure: Vec<FxHashMap<(Handle, Handle), usize>>,
+
+    inv_map: FxHashMap<Handle, ChainIx>,
+}
+
+impl Chains {
+    pub fn len(&self) -> usize {
+        self.chains.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.chains.is_empty()
+    }
+
+    pub fn push_chain(&mut self, in_chain: &[Handle]) -> usize {
+        // should we handle pre-placed handles here? probs not
+        // i'll just assume the input is correct
+
+        let ix = self.push_empty();
+
+        let chain = &mut self.chains[ix];
+
+        for &handle in in_chain {
+            chain.push(handle);
+        }
+
+        ix
+    }
+
+    pub fn push_empty(&mut self) -> usize {
+        let ix = self.chains.len();
+
+        self.chains.push(Vec::new());
+        self.structure.push(FxHashMap::default());
+
+        ix
+    }
+}
+
+// impl Layout3D {
+//     pub fn add_chain(&mut self, chain: &[Handle]) {
+// for (h, _, p) in chain {
+// let len =
+// }
+//
+//     }
+// }
+
 /*
 pub struct Layout3D {
     vertices: Vec<na::Vec3>,
@@ -257,7 +323,11 @@ fn main() {
         remaining_nodes.remove(&h.id());
     }
 
-    let mut chains: Vec<Vec<Handle>> = vec![longest_chain];
+    // let mut chains: Vec<Vec<Handle>> = vec![longest_chain];
+
+    let mut chains = Chains::default();
+
+    // chains.push_chain(
 
     //     let n = h.id();
     // })

@@ -308,6 +308,10 @@ fn main() {
 
     let mut passes: Vec<Vec<NodeId>> = Vec::new();
 
+    // let (pass_edges, pass_nbors): (Vec<(NodeId, NodeId)>, Vec<FxHashSet<NodeId>>
+
+    // let mut pass_borders: Vec<(NodeId, NodeId)> = Vec::new();
+
     // let mut remaining_marks =
     //     graph.handles().map(|h| h.id()).collect::<Vec<_>>();
     // let (mut remaining_nodes, mut marks): (Vec<_>, Vec<_>) =
@@ -444,7 +448,7 @@ fn main() {
     let mut len_vec = len_map.into_iter().collect::<Vec<_>>();
     len_vec.sort_by_key(|(_len, count)| *count);
 
-    let limit = 50;
+    let limit = 10;
 
     let mut filtered_passes = len_vec
         .iter()
@@ -457,6 +461,153 @@ fn main() {
 
     eprintln!("passes with len < {}: {}", limit, filtered_count);
     eprintln!("passes with len > {}: {}", limit, pass - filtered_count);
+
+    let filtered_passes: Vec<_> = passes
+        .into_iter()
+        .filter(|pass| {
+            let len = pass
+                .iter()
+                .map(|n| graph.node_len(Handle::pack(*n, false)))
+                .sum::<usize>();
+
+            len >= limit
+        })
+        .collect::<Vec<_>>();
+    eprintln!("built filtered passes");
+
+    let pass_nbors: Vec<(FxHashSet<NodeId>, FxHashSet<NodeId>)> =
+        filtered_passes
+            .iter()
+            .map(|pass| {
+                let start = *pass.first().unwrap();
+                let end = *pass.last().unwrap();
+
+                let start_n = graph
+                    .neighbors(Handle::pack(start, false), Direction::Left)
+                    .map(|h| h.id())
+                    .collect::<FxHashSet<_>>();
+                let end_n = graph
+                    .neighbors(Handle::pack(start, false), Direction::Right)
+                    .map(|h| h.id())
+                    .collect::<FxHashSet<_>>();
+
+                (start_n, end_n)
+            })
+            .collect();
+
+    let mut done: FxHashSet<(usize, usize)> = FxHashSet::default();
+
+    let mut singles = 0;
+    let mut doubles = 0;
+
+    let maxx = pass_nbors.len();
+
+    let mut new_passes: Vec<Vec<NodeId>> = Vec::new();
+
+    let mut cur_pass: Vec<NodeId> = Vec::new();
+
+    let mut current_neighbors: FxHashSet<NodeId> = FxHashSet::default();
+
+    let mut remaining_indices = (0..pass_nbors.len()).collect::<FxHashSet<_>>();
+
+    while let Some(ix) = remaining_indices.iter().next().copied() {
+        remaining_indices.remove(&ix);
+
+        let mut to_remove: Vec<usize> = Vec::new();
+
+        let (out_l, out_r) = pass_nbors.get(ix).unwrap();
+        let this_pass = filtered_passes.get(ix).unwrap();
+
+        cur_pass.clear();
+        cur_pass.extend(this_pass.iter().copied());
+
+        current_neighbors.clear();
+        let last = *this_pass.last().unwrap();
+        let handle = Handle::pack(last, false);
+        current_neighbors
+            .extend(graph.neighbors(handle, Direction::Right).map(|h| h.id()));
+
+        let mut inner_iter = remaining_indices.iter().copied();
+
+        while let Some(ix_) = inner_iter.next() {
+            if ix_ != ix {
+                let (in_l, in_r) = pass_nbors.get(ix_).unwrap();
+                let other_pass = filtered_passes.get(ix_).unwrap();
+
+                if !out_r.is_disjoint(in_l) {
+                    cur_pass.extend(other_pass.iter().copied());
+                    current_neighbors.clear();
+                    current_neighbors.extend(in_r.iter().copied());
+                    to_remove.push(ix_);
+                }
+            }
+        }
+
+        let pass = std::mem::take(&mut cur_pass);
+
+        new_passes.push(pass);
+
+        for to_rem in to_remove {
+            remaining_indices.remove(&to_rem);
+        }
+    }
+
+    println!("new_passes.len() {}", new_passes.len());
+
+    // let mut used_indices: FxHashSet<usize> = FxHashSet::default();
+
+    /*
+    for (ix, ((out_l, out_r), this_pass)) in
+        pass_nbors.iter().zip(filtered_passes.iter()).enumerate()
+    {
+        //
+        if used_indices.contains(&ix) {
+            continue;
+        }
+
+        cur_pass.clear();
+        cur_pass.extend(this_pass.iter().copied());
+
+        current_neighbors.clear();
+        let last = *this_pass.last().unwrap();
+        let handle = Handle::pack(last, false);
+        current_neighbors
+            .extend(graph.neighbors(handle, Direction::Right).map(|h| h.id()));
+    }
+    */
+
+    /*
+    for (ix, (out_l, out_r)) in pass_nbors.iter().enumerate() {
+        println!(" - {} \t / {}", ix, maxx);
+        for (ix_, (in_l, in_r)) in pass_nbors.iter().enumerate() {
+            let lo = ix.min(ix_);
+            let hi = ix.max(ix_);
+
+            if done.contains(&(lo, hi)) || done.contains(&(hi, lo)) || lo == hi
+            {
+                continue;
+            }
+
+            let left_match = !out_l.is_disjoint(in_l);
+            let right_match = !out_r.is_disjoint(in_r);
+
+            // let op_left_match = !out_l.is_disjoint(in_r);
+            // let op_right_match = !out_r.is_disjoint(in_l);
+
+            if left_match && right_match {
+                singles += 1;
+            } else if left_match || right_match {
+                doubles += 1;
+            }
+
+            done.insert((lo, hi));
+        }
+    }
+    */
+
+    println!("total: {}", pass);
+    println!("doubles: {}", doubles);
+    println!("singles: {}", singles);
 
     // for (ix, pass) in passes.into_iter().enumerate() {
     //

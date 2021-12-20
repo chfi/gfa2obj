@@ -448,7 +448,11 @@ fn main() {
     let mut len_vec = len_map.into_iter().collect::<Vec<_>>();
     len_vec.sort_by_key(|(_len, count)| *count);
 
-    let limit = 10;
+    let limit = 100;
+    // let limit = 10;
+    // let limit = 4;
+    // let limit = 2;
+    // let limit = 1;
 
     let mut filtered_passes = len_vec
         .iter()
@@ -553,6 +557,41 @@ fn main() {
     }
 
     println!("new_passes.len() {}", new_passes.len());
+
+    let mut total_len_ = 0;
+
+    let mut snp_len = 0;
+
+    let mut by_len = Vec::new();
+
+    for (ix, pass) in new_passes.iter().enumerate() {
+        let mut pass_len = 0;
+        for &node in pass.iter() {
+            let len = graph.node_len(Handle::pack(node, false));
+
+            if len == 1 && pass.len() == 1 {
+                snp_len += 1;
+            } else {
+                total_len_ += len;
+                pass_len += len;
+            }
+        }
+
+        by_len.push((ix, pass_len));
+        // let mut pass_len = 0;
+    }
+
+    by_len.sort_by_key(|(_, l)| *l);
+
+    println!("graph len: {}", graph.total_length());
+    println!("total len: {}", total_len_);
+    println!("snp len: {}", snp_len);
+
+    println!("----------");
+
+    for (ix, len) in by_len {
+        println!("{:4} - {:6}", ix, len);
+    }
 
     // let mut used_indices: FxHashSet<usize> = FxHashSet::default();
 

@@ -18,7 +18,7 @@ use na::{Vec2, Vec3};
 use parking_lot::Mutex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
 use anyhow::Result;
 use argh::FromArgs;
@@ -108,10 +108,37 @@ pub struct ChainIx {
 // cur_id:
 // }
 
+pub struct BezierQuad {
+    p0: (f64, f64),
+    p1: (f64, f64),
+    p2: (f64, f64),
+}
+
+pub struct RadialLayout {
+    // this should probably be a curve of any length and complexity
+    curves: Vec<BezierQuad>,
+    structure: Vec<FxHashMap<(f64, f64), FxHashSet<usize>>>,
+}
+
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct Chain {
+    chain: Vec<Handle>,
+    left: Option<Handle>,
+    right: Option<Handle>,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub struct ChainRef<'a> {
+    chain: &'a [Handle],
+    left: Option<Handle>,
+    right: Option<Handle>,
+}
+
 #[derive(Default, Clone)]
 pub struct Chains {
     // root is assumed to be index 0
-    chains: Vec<Vec<Handle>>,
+    // chains: Vec<Vec<Handle>>,
+    chains: Vec<Chain>,
     structure: Vec<FxHashMap<(Handle, Handle), FxHashSet<usize>>>,
 
     inv_map: FxHashMap<Handle, ChainIx>,
@@ -136,7 +163,14 @@ impl Chains {
         structure.entry(range).or_default().insert(child);
     }
 
-    pub fn push_chain(&mut self, in_chain: &[Handle]) -> usize {
+    // pub fn push_chain(&mut self, in_chain: &Chain) -> usize {
+    // pub fn push_chain(&mut self, in_chain: &ChainRef<'_>) -> usize {
+    pub fn push_chain(
+        &mut self,
+        in_chain: &[Handle],
+        left: Option<Handle>,
+        right: Option<Handle>,
+    ) -> usize {
         // should we handle pre-placed handles here? probs not
         // i'll just assume the input is correct
 
@@ -144,8 +178,11 @@ impl Chains {
 
         let chain = &mut self.chains[ix];
 
+        chain.left = left;
+        chain.right = right;
+
         for &handle in in_chain {
-            chain.push(handle);
+            chain.chain.push(handle);
         }
 
         ix
@@ -154,71 +191,12 @@ impl Chains {
     pub fn push_empty(&mut self) -> usize {
         let ix = self.chains.len();
 
-        self.chains.push(Vec::new());
+        self.chains.push(Chain::default());
         self.structure.push(FxHashMap::default());
 
         ix
     }
 }
-
-// impl Layout3D {
-//     pub fn add_chain(&mut self, chain: &[Handle]) {
-// for (h, _, p) in chain {
-// let len =
-// }
-//
-//     }
-// }
-
-/*
-pub struct Layout3D {
-    vertices: Vec<na::Vec3>,
-    // links: Vec<(usize, usize)>,
-    link_map: FxHashMap<usize, usize>,
-
-    // each node is represented by a sequence of vertices
-    node_vx_map: FxHashMap<NodeId, std::ops::Range<usize>>,
-
-    top_level: Chain,
-
-    chain_vx_map: FxHashMap<(PathId, StepPtr, StepPtr), std::ops::Range<usize>>,
-}
-
-impl Layout3D {
-
-    /// Start a layout using a single path as the spine
-    pub fn from_path(graph: &PackedGraph, path: PathId) -> Option<Self> {
-        let mut steps = graph.path_steps(path)?;
-
-        let first = steps.next()?;
-
-        let h0 = first.handle();
-
-        let node_len = graph.node_len(h0);
-        let start = na::vec3(0.0, 0.0, 0.0);
-
-        let end = na::vec3(len_to_pos(node_len), 0.0, 0.0);
-
-        unimplemented!();
-    }
-}
-*/
-
-/*
-#[derive(Clone)]
-pub struct Chain {
-    // vx_range: std::ops::Range<usize>,
-    path: PathId,
-    start: StepPtr,
-    end: StepPtr,
-
-    // start_h: Handle,
-    // end_h: Handle,
-    nodes: Vec<NodeId>,
-
-    children: FxHashMap<(usize, usize), Chain>,
-}
-*/
 
 pub struct VecChain {
     vertices: Vec<na::Vec3>,
@@ -313,6 +291,179 @@ impl VecChain {
     }
 }
 
+fn main() {
+    use std::time::Instant;
+
+    let args: Args = argh::from_env();
+
+    eprintln!("loading graph");
+
+    let t0 = Instant::now();
+    let (graph, path_pos) = load_gfa(&args.gfa_path).unwrap();
+    eprintln!("loaded in {} s", t0.elapsed().as_secs_f64());
+
+    let mut stack: VecDeque<NodeId> = VecDeque::new();
+
+    let mut pass = 0;
+
+    let mut passes: Vec<Vec<NodeId>> = Vec::new();
+
+    // let mut remaining_marks =
+    //     graph.handles().map(|h| h.id()).collect::<Vec<_>>();
+    // let (mut remaining_nodes, mut marks): (Vec<_>, Vec<_>) =
+    //     graph.handles().map(|h| (h.id(), false)).unzip();
+
+    let mut remaining_nodes =
+        graph.handles().map(|h| h.id()).collect::<FxHashSet<_>>();
+
+    let mut remaining_order =
+        remaining_nodes.iter().copied().collect::<Vec<_>>();
+    // remaining_order.sort();
+    // remaining_order.reverse();
+    // graph.handles().map(|h| h.id()).collect::<FxHashSet<_>>();
+
+    let mut len_map: FxHashMap<usize, usize> = FxHashMap::default();
+
+    let total_t = Instant::now();
+    loop {
+        // let mut end_pass = false;
+        // for handle in graph.handles() {
+        // while let Some(handle) = graph
+        //     // for handle in graph
+        //     .handles()
+        //     .filter(|h| remaining_nodes.contains(&h.id()))
+        //     .next()
+
+        /*
+        for (node, mark_done) in remaining_nodes.iter().zip(marks.iter_mut()) {
+            //
+        }
+        */
+
+        // if let Some(node) = remaining_order.pop() {
+        while let Some(node) = remaining_order.pop() {
+            // let node = handle.id();
+
+            if !remaining_nodes.contains(&node) {
+                continue;
+            }
+
+            stack.push_back(node);
+
+            // println!("{}", remaining_nodes.len());
+
+            let mut this_pass = Vec::new();
+
+            let t0 = Instant::now();
+
+            while let Some(current) = stack.pop_back() {
+                remaining_nodes.remove(&current);
+                this_pass.push(current);
+
+                let handle = Handle::pack(current, false);
+
+                if let Some(next) = graph
+                    .neighbors(handle, Direction::Right)
+                    // .chain(graph.neighbors(handle, Direction::Left))
+                    .filter(|other| remaining_nodes.contains(&other.id()))
+                    .next()
+                {
+                    stack.push_back(next.id());
+                }
+
+                /*
+                if let Some(next) = graph
+                    .neighbors(handle, Direction::Right)
+                    .chain(graph.neighbors(handle, Direction::Left))
+                    .filter(|other| remaining_nodes.contains(&other.id()))
+                    .next()
+                {
+                    stack.push_back(next.id());
+                }
+                */
+                // else {
+                //     end_pass = true;
+                //     break;
+                // }
+            }
+
+            let pass_len = this_pass
+                .iter()
+                .map(|n| graph.node_len(Handle::pack(*n, false)))
+                .sum::<usize>();
+
+            if pass < 30 {
+                eprintln!(
+                    "pass {}\t {} left\tlen: {}",
+                    pass,
+                    remaining_nodes.len(),
+                    pass_len
+                );
+            }
+
+            *len_map.entry(pass_len).or_default() += 1;
+
+            passes.push(this_pass);
+            pass += 1;
+            // if end_pass {
+            //     break;
+            // }
+        }
+
+        remaining_order.clear();
+        remaining_order.extend(remaining_nodes.iter().copied());
+        remaining_order.sort();
+        remaining_order.reverse();
+
+        // println!("pass {} took {} s", pass, t0.elapsed().as_secs_f64());
+
+        if remaining_nodes.is_empty() {
+            break;
+        }
+    }
+
+    eprintln!("took {} s", total_t.elapsed().as_secs_f64());
+
+    eprintln!("done in {} passes", pass);
+
+    // let mut total_len = 0;
+    let total_len = passes
+        .iter()
+        .map(|nodes| {
+            nodes
+                .iter()
+                .map(|n| graph.node_len(Handle::pack(*n, false)))
+                .sum::<usize>()
+        })
+        .sum::<usize>();
+
+    let avg_len = (total_len as f64) / (pass as f64);
+
+    eprintln!("avg len: {}", avg_len);
+
+    let mut len_vec = len_map.into_iter().collect::<Vec<_>>();
+    len_vec.sort_by_key(|(_len, count)| *count);
+
+    let limit = 50;
+
+    let mut filtered_passes = len_vec
+        .iter()
+        .filter_map(
+            |(len, count)| if *len < limit { Some(*count) } else { None },
+        )
+        .collect::<Vec<_>>();
+
+    let filtered_count = filtered_passes.iter().sum::<usize>();
+
+    eprintln!("passes with len < {}: {}", limit, filtered_count);
+    eprintln!("passes with len > {}: {}", limit, pass - filtered_count);
+
+    // for (ix, pass) in passes.into_iter().enumerate() {
+    //
+    // }
+}
+
+/*
 fn main() {
     let args: Args = argh::from_env();
 
@@ -422,6 +573,7 @@ fn main() {
         println!("{} - {}", key, len_map.get(&key).unwrap());
     }
 }
+*/
 
 pub struct ChainMap {
     remaining: FxHashMap<PathId, PathChains>,

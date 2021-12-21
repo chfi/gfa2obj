@@ -589,9 +589,47 @@ fn main() {
 
     println!("----------");
 
+    let mut another_map: FxHashMap<Handle, usize> = FxHashMap::default();
+
     for (ix, len) in by_len {
-        println!("{:4} - {:6}", ix, len);
+        let pass = &new_passes[ix];
+
+        let left = pass.first().unwrap();
+        let right = pass.last().unwrap();
+
+        let left_adj = graph
+            .neighbors(Handle::pack(*left, false), Direction::Left)
+            .chain(
+                graph.neighbors(Handle::pack(*left, false), Direction::Right),
+            )
+            .map(|h| {
+                *another_map.entry(h).or_default() += 1;
+                h.0
+            })
+            .collect::<Vec<_>>();
+        let right_adj = graph
+            .neighbors(Handle::pack(*right, false), Direction::Right)
+            .chain(
+                graph.neighbors(Handle::pack(*right, false), Direction::Left),
+            )
+            // .map(|h| h.0)
+            .map(|h| {
+                *another_map.entry(h).or_default() += 1;
+                h.0
+            })
+            .collect::<Vec<_>>();
+
+        println!("{:4} - {:6}\t{:?} - {:?}", ix, len, left_adj, right_adj);
     }
+
+    println!("------------------");
+
+    for (h, count) in another_map {
+        if count > 1 {
+            println!("{:?}\t{}", h, count);
+        }
+    }
+    // println!("{:?}", another_map);
 
     // let mut used_indices: FxHashSet<usize> = FxHashSet::default();
 

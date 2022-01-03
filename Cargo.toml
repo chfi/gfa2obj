@@ -13,6 +13,8 @@ readme = "README.md"
 gfa = { version = "0.10" }
 handlegraph = "0.7.0-alpha.7"
 
+graphblas_sparse_linear_algebra = "0.5"
+
 crossbeam = "0.8"
 parking_lot = "0.11.1"
 rayon = "1.5"

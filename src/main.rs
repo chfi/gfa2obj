@@ -448,11 +448,11 @@ fn main() {
     let mut len_vec = len_map.into_iter().collect::<Vec<_>>();
     len_vec.sort_by_key(|(_len, count)| *count);
 
-    let limit = 100;
+    // let limit = 100;
     // let limit = 10;
     // let limit = 4;
     // let limit = 2;
-    // let limit = 1;
+    let limit = 1;
 
     let mut filtered_passes = len_vec
         .iter()
@@ -599,9 +599,9 @@ fn main() {
 
         let left_adj = graph
             .neighbors(Handle::pack(*left, false), Direction::Left)
-            .chain(
-                graph.neighbors(Handle::pack(*left, false), Direction::Right),
-            )
+            // .chain(
+            //     graph.neighbors(Handle::pack(*left, false), Direction::Right),
+            // )
             .map(|h| {
                 *another_map.entry(h).or_default() += 1;
                 h.0
@@ -609,9 +609,9 @@ fn main() {
             .collect::<Vec<_>>();
         let right_adj = graph
             .neighbors(Handle::pack(*right, false), Direction::Right)
-            .chain(
-                graph.neighbors(Handle::pack(*right, false), Direction::Left),
-            )
+            // .chain(
+            //     graph.neighbors(Handle::pack(*right, false), Direction::Left),
+            // )
             // .map(|h| h.0)
             .map(|h| {
                 *another_map.entry(h).or_default() += 1;

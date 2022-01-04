@@ -3,9 +3,9 @@ use std::{io::BufReader, sync::Arc};
 use crate::sparse::*;
 
 use graphblas::bindings_to_graphblas_implementation::{
-    GrB_Info_GrB_NULL_POINTER, GrB_LOR_LAND_SEMIRING_BOOL, GrB_PLUS_INT32,
-    GrB_SECOND_INT32, GrB_Vector_apply, GrB_Vector_apply_BinaryOp2nd_INT32,
-    GrB_vxm,
+    GrB_DESC_RC, GrB_Info_GrB_NULL_POINTER, GrB_LOR_LAND_SEMIRING_BOOL,
+    GrB_PLUS_INT32, GrB_SECOND_INT32, GrB_Vector_apply,
+    GrB_Vector_apply_BinaryOp2nd_INT32, GrB_vxm,
 };
 use handlegraph::handle::NodeId;
 use rayon::prelude::*;
@@ -25,6 +25,7 @@ lazy_static! {
 pub fn bfs(
     adj_mat: &SparseMatrix<bool>,
     start: NodeId,
+    limit: Option<i32>,
 ) -> Result<SparseVector<i32>> {
     let s = (start.0 - 1) as usize;
     // let n = segments.len();
@@ -77,6 +78,10 @@ pub fn bfs(
     loop {
         level += 1;
 
+        // if level % 100 == 0 {
+        //     eprintln!(" > level {}", level);
+        // }
+
         unsafe {
             GrB_Vector_apply_BinaryOp2nd_INT32(
                 v.graphblas_vector(),
@@ -99,19 +104,23 @@ pub fn bfs(
                 GrB_LOR_LAND_SEMIRING_BOOL,
                 q.graphblas_vector(),
                 adj_mat.graphblas_matrix(),
-                options.to_graphblas_descriptor(),
+                GrB_DESC_RC, // options.to_graphblas_descriptor(),
             )
         };
 
-        if q.number_of_stored_elements()? == 0 {
+        if q.number_of_stored_elements()? == 0 || Some(level) == limit {
             break;
         }
     }
 
+    // eprintln!("BFS finished after {}", level);
+
     Ok(v)
 }
 
-pub fn gfa_to_adj_matrix(gfa_path: &str) -> Result<SparseMatrix<bool>> {
+pub fn gfa_to_adj_matrix(
+    gfa_path: &str,
+) -> Result<(SparseMatrix<bool>, FxHashMap<usize, usize>)> {
     use std::fs::File;
     use std::io::prelude::*;
 
@@ -177,7 +186,7 @@ pub fn gfa_to_adj_matrix(gfa_path: &str) -> Result<SparseMatrix<bool>> {
             .set_element(MatrixElement::from_triple(row, column, true))?;
     }
 
-    Ok(adj_matrix)
+    Ok((adj_matrix, segments))
 }
 
 fn parallel_calls_to_graphblas() {

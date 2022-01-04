@@ -296,10 +296,40 @@ fn main() {
     let args: Args = argh::from_env();
 
     let t0 = Instant::now();
-
-    let adj_mat =
+    let (adj_mat, segments) =
         gfa2obj::sparse_graph::gfa_to_adj_matrix(&args.gfa_path).unwrap();
     eprintln!("loaded in {} s", t0.elapsed().as_secs_f64());
+
+    // let start = NodeId::from(1);
+    let mut single_nucleotide_nodes: Vec<NodeId> = Vec::new();
+
+    for (&id, &len) in segments.iter() {
+        if len == 1 {
+            let id = NodeId::from(id);
+            single_nucleotide_nodes.push(id);
+        }
+    }
+
+    let limit = 5;
+
+    let snn_count = single_nucleotide_nodes.len();
+    eprintln!("number of SNNs: {}", snn_count);
+
+    let t0 = Instant::now();
+    for (ix, id) in single_nucleotide_nodes.into_iter().enumerate() {
+        if ix % 1000 == 0 {
+            eprintln!(" {:7} / {:7}", ix, snn_count);
+        }
+
+        let bfs_result =
+            gfa2obj::sparse_graph::bfs(&adj_mat, id, Some(limit)).unwrap();
+    }
+    eprintln!(
+        "limit {} BFSes across all {} SNNs took {} s",
+        limit,
+        snn_count,
+        t0.elapsed().as_secs_f64()
+    );
 }
 
 fn main_() {

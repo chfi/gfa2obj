@@ -431,8 +431,6 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 [[package]]
 name = "graphblas_sparse_linear_algebra"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4b504db318c21a3cb17a838062fd5845ca10c37b2c1f1e1f750e63003c65d6c"
 dependencies = [
  "bindgen",
  "cmake",

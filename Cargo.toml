@@ -13,7 +13,10 @@ readme = "README.md"
 gfa = { version = "0.10" }
 handlegraph = "0.7.0-alpha.7"
 
-graphblas_sparse_linear_algebra = "0.5"
+# graphblas_sparse_linear_algebra = "0.5"
+# graphblas_sparse_linear_algebra = { git = "https://github.com/chfi/graphblas_sparse_linear_algebra.git" }
+
+graphblas_sparse_linear_algebra = { path = "../graphblas_sparse_linear_algebra" }
 
 crossbeam = "0.8"
 parking_lot = "0.11.1"

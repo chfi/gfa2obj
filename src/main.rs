@@ -293,6 +293,17 @@ impl VecChain {
 
 fn main() {
     use std::time::Instant;
+    let args: Args = argh::from_env();
+
+    let t0 = Instant::now();
+
+    let adj_mat =
+        gfa2obj::sparse_graph::gfa_to_adj_matrix(&args.gfa_path).unwrap();
+    eprintln!("loaded in {} s", t0.elapsed().as_secs_f64());
+}
+
+fn main_() {
+    use std::time::Instant;
 
     let args: Args = argh::from_env();
 

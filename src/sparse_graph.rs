@@ -2,6 +2,12 @@ use std::{io::BufReader, sync::Arc};
 
 use crate::sparse::*;
 
+use graphblas::bindings_to_graphblas_implementation::{
+    GrB_Info_GrB_NULL_POINTER, GrB_LOR_LAND_SEMIRING_BOOL, GrB_PLUS_INT32,
+    GrB_SECOND_INT32, GrB_Vector_apply, GrB_Vector_apply_BinaryOp2nd_INT32,
+    GrB_vxm,
+};
+use handlegraph::handle::NodeId;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -14,6 +20,95 @@ use anyhow::Result;
 lazy_static! {
     static ref GRAPHBLAS_CTX: Arc<Context> =
         Context::init_ready(Mode::NonBlocking).unwrap();
+}
+
+pub fn bfs(
+    adj_mat: &SparseMatrix<bool>,
+    start: NodeId,
+) -> Result<SparseVector<i32>> {
+    let s = (start.0 - 1) as usize;
+    // let n = segments.len();
+    let n = adj_mat.row_height()?;
+
+    let vector_size = ElementIndex::from(n);
+    let mut v: SparseVector<i32> =
+        SparseVector::new(&GRAPHBLAS_CTX, &vector_size)?;
+
+    let mut q = SparseVector::<bool>::new(&GRAPHBLAS_CTX, &vector_size)?;
+    q.set_element(VectorElement::new(s, true))?;
+
+    let matrix_size = Size::new(n, n);
+    let mut adj_matrix: SparseMatrix<bool> =
+        SparseMatrix::new(&GRAPHBLAS_CTX, &matrix_size)?;
+
+    let mut level = 0i32;
+
+    // let add_op = Plus::<i32, i32, i32>::new();
+    // let second_op = Second::<bool, i32, i32>::new();
+    // let semiring = crate::sparse::ops::semiring::
+    let options = OperatorOptions::new_default();
+
+    // let and_monoid = LogicalAnd::<bool>::new();
+    // let or_monoid = LogicalOr::<bool>::new();
+
+    // let and_or_semiring = LAndLOr::new();
+
+    // let and_or_monoid =
+
+    // let apply_op =
+    //     BinaryOperatorApplier::new(&second_op, &options, Some(&add_op));
+
+    // let ewise_vec_set_op = EwiseVecAddBinOp::<i32, i32, i32>::new(
+    //     &second_op,
+    //     &options,
+    //     Some(&add_op),
+    // );
+
+    // let vec_mat_mul_op =
+    //     VecMatMulOp::<bool, bool, bool>::new(&and_or_semiring, &options, None);
+
+    // let element_wise_matrix_add_operator =
+    //     ElementWiseMatrixMultiplicationBinaryOperator::<i32, i32, i32>::new(
+    //         &add_operator,
+    //         &options,
+    //         Some(&add_operator),
+    //     );
+
+    loop {
+        level += 1;
+
+        unsafe {
+            GrB_Vector_apply_BinaryOp2nd_INT32(
+                v.graphblas_vector(),
+                std::ptr::null_mut(),
+                GrB_PLUS_INT32,
+                GrB_SECOND_INT32,
+                q.graphblas_vector(),
+                level,
+                // GrB_Info_GrB_NULL_POINTER,
+                std::ptr::null_mut(),
+                // options.to_graphblas_descriptor(),
+            )
+        };
+
+        unsafe {
+            GrB_vxm(
+                q.graphblas_vector(),
+                v.graphblas_vector(),
+                std::ptr::null_mut(),
+                GrB_LOR_LAND_SEMIRING_BOOL,
+                q.graphblas_vector(),
+                adj_mat.graphblas_matrix(),
+                options.to_graphblas_descriptor(),
+            )
+        };
+
+        if q.number_of_stored_elements()? == 0 {
+            break;
+        }
+    }
+
+    Ok(v)
 }
 
 pub fn gfa_to_adj_matrix(gfa_path: &str) -> Result<SparseMatrix<bool>> {

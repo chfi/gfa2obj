@@ -1,3 +1,4 @@
+use flexi_logger::{Duplicate, FileSpec, Logger};
 use gfa::{gfa::GFA, optfields::OptFields};
 use gfa2obj::sparse::GetVectorElementList;
 #[allow(unused_imports)]
@@ -266,7 +267,88 @@ pub struct Chain {
     right: FxHashSet<NodeId>,
 }
 
+pub struct ChainComplex {
+    chains: Vec<Chain>,
+
+    lens: Vec<usize>,
+
+    chain_children: Vec<Vec<usize>>,
+}
+
+impl ChainComplex {
+    pub fn from_chains(graph: &PackedGraph, chains: Vec<Chain>) -> Self {
+        let chain_children = vec![Vec::new(); chains.len()];
+
+        let mut max_len = 0;
+
+        let mut chains_lens: Vec<_> = chains
+            .into_iter()
+            .map(|chain| {
+                let len = chain
+                    .chain
+                    .iter()
+                    .map(|n| graph.node_len(Handle::pack(*n, false)))
+                    .sum::<usize>();
+
+                max_len = max_len.max(len);
+
+                (chain, len)
+            })
+            .collect();
+
+        chains_lens.sort_by_key(|(_, l)| *l);
+        chains_lens.reverse();
+
+        let (chains, lens) = chains_lens.into_iter().unzip();
+
+        Self {
+            chains,
+            lens,
+            chain_children,
+        }
+    }
+
+    pub fn potential_children_for(&self, parent: usize) -> Vec<usize> {
+        let mut res = Vec::new();
+
+        let chain_nodes = self.chains[parent]
+            .chain
+            .iter()
+            .copied()
+            .collect::<FxHashSet<_>>();
+
+        for (ix, other) in self.chains.iter().enumerate() {
+            if ix == parent {
+                continue;
+            }
+
+            let found_left = !other.left.is_disjoint(&chain_nodes);
+            let found_right = !other.right.is_disjoint(&chain_nodes);
+
+            if found_left && found_right {
+                res.push(ix);
+            }
+        }
+
+        res
+    }
+}
+
 fn main() {
+    // let spec = match (args.trace, args.debug, args.quiet) {
+    //     (true, _, _) => "trace",
+    //     (_, true, _) => "debug",
+    //     (_, _, true) => "",
+    //     _ => "info",
+    // };
+
+    let logger = Logger::try_with_env_or_str("debug")
+        .unwrap()
+        .log_to_file(FileSpec::default())
+        .duplicate_to_stderr(Duplicate::Debug)
+        .start()
+        .unwrap();
+
     use std::time::Instant;
 
     let args: Args = argh::from_env();
@@ -300,7 +382,6 @@ fn main() {
     // };
 
     loop {
-        eprintln!(" - {}", count);
         if let Some(&node) = remaining_nodes.iter().next() {
             if visited.contains(&node) {
                 remaining_nodes.remove(&node);
@@ -360,27 +441,44 @@ fn main() {
         count += 1;
     }
 
-    let mut longest_ix = 0;
-    let mut longest = 0;
-    for (ix, chain) in chains.iter().enumerate() {
-        if chain.chain.len() > longest {
-            longest_ix = ix;
-            longest = chain.chain.len();
-        }
-        eprintln!(" {:4} - {:?}", ix, chain.chain);
+    let mut chain_complex = ChainComplex::from_chains(&graph, chains);
+    {
+        let longest_ix = 0;
+        let longest = &chain_complex.lens[0];
+
+        eprintln!(
+            "{:?}\t{:?}",
+            &chain_complex.chains[longest_ix].left,
+            &chain_complex.chains[longest_ix].right
+        );
+        eprintln!(
+            "finished with {} chains after {} iterations",
+            chain_complex.chains.len(),
+            count
+        );
+
+        eprintln!("longest chain: {}", longest);
     }
 
-    eprintln!(
-        "{:?}\t{:?}",
-        &chains[longest_ix].left, &chains[longest_ix].right
-    );
-    eprintln!(
-        "finished with {} chains after {} iterations",
-        chains.len(),
-        count
-    );
+    let mut children: Vec<Vec<usize>> = Vec::new();
+    for (ix, chain) in chain_complex.chains.iter().enumerate() {
+        //
+        if chain.chain.len() < 10 {
+            break;
+        }
+        eprintln!(" {} - {}", ix, chain.chain.len());
+        let pot_children = chain_complex.potential_children_for(ix);
+        children.push(pot_children);
+    }
 
-    eprintln!("longest chain: {}", longest);
+    eprintln!("-----------------------------");
+    children.reverse();
+
+    for (ix, children) in children.into_iter().enumerate() {
+        if !children.is_empty() {
+            eprintln!("{} - {}", ix, children.len());
+        }
+    }
 }
 
 fn main_() {

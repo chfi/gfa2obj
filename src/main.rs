@@ -279,6 +279,8 @@ pub struct ChainComplex {
 }
 
 pub struct Curve {
+    transform: na::Mat3,
+
     total_length: usize,
 
     /// each chain/curve has a map from nodes contained in the chain
@@ -318,7 +320,90 @@ pub struct CurveComplex {
     curves: Vec<Curve>,
 }
 
+pub fn lerp(p0: na::Vec3, p1: na::Vec3, t: f32) -> na::Vec3 {
+    let d = p1 - p0;
+    let t = t.clamp(0.0, 1.0);
+    p0 + d * t
+}
+
+pub fn triangle(p0: na::Vec3, p1: na::Vec3, height: f32, t: f32) -> na::Vec3 {
+    let p_t = lerp(p0, p1, t);
+    let h_t = (t - 0.5).abs();
+    // let h_t = (0.5 - height).abs()
+}
+
 impl CurveComplex {
+    // just one height and curve function for now, operating on [0,1]
+    pub fn write_obj<W: std::io::Write, CurveGen, HeightGen>(
+        &self,
+        mut out: W,
+        curve_gen: CurveGen,
+        height_gen: HeightGen,
+    ) -> Result<()>
+    where
+        CurveGen: Fn(na::Vec3, na::Vec3, f32) -> na::Vec3,
+        HeightGen: Fn(na::Vec3, na::Vec3, f32) -> na::Vec3,
+    {
+        let mut queue: VecDeque<(na::Mat3, usize)> = VecDeque::new();
+        queue.push_back((na::identity(), 0));
+
+        let mut visited: FxHashSet<usize> = FxHashSet::default();
+
+        let ncurves = self.curves.len();
+
+        let mut curve_endpoints: Vec<(na::Vec3, na::Vec3)> =
+            vec![(na::zero(), na::zero()); ncurves];
+
+        // let curve_0 =
+
+        let left_0 = na::zero();
+        let right_0 = na::vec3(0.0, 0.0, self.curves[0].total_length as f32);
+
+        curve_endpoints[0] = (left_0, right_0);
+
+        let chain_complex = &self.chain_complex;
+
+        while let Some((transform, parent_ix)) = queue.pop_front() {
+            if !visited.insert(parent_ix) {
+                continue;
+            }
+
+            let p_chain = &chain_complex.chains[parent_ix];
+
+            let curve = &self.curves[parent_ix];
+
+            let new_transform = transform * curve.transform;
+
+            // self.curve_children(chain_ix)
+            // let curve_anchors = self.curve_anchors(parent_ix);
+
+            let curve_children = self.curve_children(parent_ix);
+
+            for (child_ix, t0, t1) in curve_children {
+                let child = &self.curves[child_ix];
+
+                // let p0 =
+
+                queue.push_back((new_transform, child_ix));
+                // let connect = t1 - t0;
+
+                // curve_endpoints[child_ix] = (t0, t1);
+
+                // let p0 =
+            }
+
+            // let p_curve = &self.curve_anchors(parent_ix)
+
+            // for child in
+
+            // push children back
+        }
+
+        // while let Some(val) = queue.
+
+        Ok(())
+    }
+
     pub fn curve_anchors(&self, parent_ix: usize) -> Vec<Anchor<(f32, usize)>> {
         let children = self.curve_children(parent_ix);
 
@@ -410,7 +495,19 @@ impl CurveComplex {
             let total_length = offset;
             assert!(total_length == chain_len);
 
+            #[rustfmt::skip]
+            let transform = if chain_ix == 0 {
+                na::mat3(1.0, 0.0, 0.0,
+                         0.0, 1.0, 0.0,
+                         0.0, 0.0, 1.0)
+            } else {
+                na::mat3(0.0, 1.0, 0.0,
+                         1.0, 0.0, 0.0,
+                         0.0, 0.0, 1.0)
+            };
+
             let curve = Curve {
+                transform,
                 total_length,
                 node_pos_offsets,
             };
@@ -727,8 +824,6 @@ fn main() {
     let mut anchors = Vec::new();
     let mut children_ranks = Vec::new();
 
-    let mut children_angles = Vec::new();
-
     for parent_ix in 0..curve_complex.curves.len() {
         let chain_complex = &curve_complex.chain_complex;
         let chains = &chain_complex.chains;
@@ -752,6 +847,7 @@ fn main() {
             .collect();
 
         // map from child chain index to angle -- angle, not t!
+        /*
         let angles: FxHashMap<usize, f32> = ranks
             .iter()
             .map(|(chain_ix, rank)| {
@@ -761,9 +857,9 @@ fn main() {
                 (*chain_ix, angle)
             })
             .collect();
+        */
 
         children_ranks.push(ranks);
-        children_angles.push(angles);
 
         anchors.push(curve_anchors);
     }

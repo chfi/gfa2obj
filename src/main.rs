@@ -289,6 +289,29 @@ pub struct Curve {
     // child_anchor_id: Vec<(NodeId, NodeId)>,
 }
 
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub enum Anchor<T: Copy + PartialOrd> {
+    Left(T),
+    Right(T),
+}
+
+impl<T: Copy + PartialOrd> Anchor<T> {
+    pub fn is_left(&self) -> bool {
+        matches!(self, Anchor::Left(_))
+    }
+
+    pub fn is_right(&self) -> bool {
+        matches!(self, Anchor::Right(_))
+    }
+
+    pub fn t(&self) -> T {
+        match self {
+            Anchor::Left(v) => *v,
+            Anchor::Right(v) => *v,
+        }
+    }
+}
+
 pub struct CurveComplex {
     chain_complex: Arc<ChainComplex>,
 
@@ -296,6 +319,27 @@ pub struct CurveComplex {
 }
 
 impl CurveComplex {
+    pub fn curve_anchors(&self, parent_ix: usize) -> Vec<Anchor<(f32, usize)>> {
+        let children = self.curve_children(parent_ix);
+
+        let mut anchors = children
+            .into_iter()
+            .flat_map(|(i, l, r)| {
+                let left = Anchor::Left((l, i));
+                let right = Anchor::Right((r, i));
+                [left, right].into_iter()
+            })
+            .collect::<Vec<_>>();
+
+        anchors.sort_by(|a, b| {
+            let (af, ai) = a.t();
+            let (bf, bi) = b.t();
+            af.partial_cmp(&bf).unwrap_or_else(|| ai.cmp(&bi))
+        });
+
+        anchors
+    }
+
     pub fn curve_children(&self, chain_ix: usize) -> Vec<(usize, f32, f32)> {
         let chain = &self.chain_complex.chains[chain_ix].chain;
         let curve = &self.curves[chain_ix];
@@ -679,6 +723,50 @@ fn main() {
 
     let mut curve_complex =
         CurveComplex::from_chain_complex(&graph, chain_complex);
+
+    let mut anchors = Vec::new();
+    let mut children_ranks = Vec::new();
+
+    let mut children_angles = Vec::new();
+
+    for parent_ix in 0..curve_complex.curves.len() {
+        let chain_complex = &curve_complex.chain_complex;
+        let chains = &chain_complex.chains;
+
+        let curve_anchors = curve_complex.curve_anchors(parent_ix);
+
+        let mut ranks = curve_anchors
+            .iter()
+            .map(|a| {
+                let (_f, i) = a.t();
+                i
+            })
+            .collect::<Vec<_>>();
+
+        ranks.sort();
+        // map from chain index to rank
+        let ranks: FxHashMap<usize, usize> = ranks
+            .into_iter()
+            .enumerate()
+            .map(|(rank, chain_ix)| (chain_ix, rank))
+            .collect();
+
+        // map from child chain index to angle -- angle, not t!
+        let angles: FxHashMap<usize, f32> = ranks
+            .iter()
+            .map(|(chain_ix, rank)| {
+                let mut angle = (*rank as f32) / ranks.len() as f32;
+                angle *= std::f32::consts::TAU;
+
+                (*chain_ix, angle)
+            })
+            .collect();
+
+        children_ranks.push(ranks);
+        children_angles.push(angles);
+
+        anchors.push(curve_anchors);
+    }
 }
 
 fn main_() {

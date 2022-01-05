@@ -261,19 +261,93 @@ fn main__() {
     eprintln!("|nodes| - |removed| + |inserted| = {}", s - r + i);
 }
 
+#[derive(Clone)]
 pub struct Chain {
     chain: VecDeque<NodeId>,
     left: FxHashSet<NodeId>,
     right: FxHashSet<NodeId>,
 }
 
+#[derive(Clone)]
 pub struct ChainComplex {
     chains: Vec<Chain>,
 
     lens: Vec<usize>,
 
-    chains_children: Vec<Vec<usize>>,
+    chains_children: Vec<Vec<(usize, std::ops::RangeInclusive<usize>)>>,
     chains_parent: Vec<Option<usize>>,
+}
+
+pub struct Curve {
+    total_length: usize,
+
+    /// each chain/curve has a map from nodes contained in the chain
+    /// to the position offset from the start, and node length
+    node_pos_offsets: FxHashMap<NodeId, (usize, usize)>,
+    // child_anchor_f32: Vec<(f32, f32)>,
+    // child_anchor_ix: Vec<std::ops::Range<usize>>,
+    // child_anchor_id: Vec<(NodeId, NodeId)>,
+}
+
+pub struct CurveComplex {
+    chain_complex: Arc<ChainComplex>,
+
+    curves: Vec<Curve>,
+}
+
+impl CurveComplex {
+    pub fn chain_complex_mut(&mut self) -> &mut ChainComplex {
+        Arc::make_mut(&mut self.chain_complex)
+    }
+
+    pub fn from_chain_complex(
+        graph: &PackedGraph,
+        chain_complex: ChainComplex,
+    ) -> Self {
+        let chain_complex = Arc::new(chain_complex);
+        let mut curves = Vec::new();
+
+        for chain_ix in 0..chain_complex.chains.len() {
+            let chain = &chain_complex.chains[chain_ix];
+
+            let children = &chain_complex.chains_children[chain_ix];
+
+            let chain_len = chain_complex.lens[chain_ix];
+
+            let mut offset = 0;
+
+            let mut node_pos_offsets: FxHashMap<NodeId, (usize, usize)> =
+                FxHashMap::default();
+
+            // 1. step through the entire chain and find the bp pos
+            // for each node
+            for (ix, node) in chain.chain.iter().enumerate() {
+                let h = Handle::pack(*node, false);
+                let node_len = graph.node_len(h);
+
+                // 2. for each child, map the indices to curve offsets
+                // in the range [0..1];
+                node_pos_offsets.insert(*node, (offset, node_len));
+
+                offset += node_len;
+            }
+
+            let total_length = offset;
+            assert!(total_length == chain_len);
+
+            let curve = Curve {
+                total_length,
+                node_pos_offsets,
+            };
+
+            curves.push(curve);
+        }
+
+        Self {
+            chain_complex,
+            curves,
+        }
+    }
 }
 
 impl ChainComplex {
@@ -318,11 +392,37 @@ impl ChainComplex {
             return false;
         }
 
-        let children = &mut self.chains_children[parent];
-        children.push(child);
-        self.chains_parent[child] = Some(parent);
+        let p = &self.chains[parent];
+        let c = &self.chains[child];
 
-        true
+        let mut left: Option<usize> = None;
+        let mut right: Option<usize> = None;
+
+        for (ix, node) in p.chain.iter().enumerate() {
+            if c.left.contains(node) {
+                left = Some(ix);
+            }
+            if c.right.contains(node) {
+                right = Some(ix);
+            }
+
+            if left.is_some() && right.is_some() {
+                break;
+            }
+        }
+
+        if let (Some(left), Some(right)) = (left, right) {
+            let range = left..=right;
+
+            let children = &mut self.chains_children[parent];
+            children.push((child, range));
+
+            self.chains_parent[child] = Some(parent);
+
+            true
+        } else {
+            false
+        }
     }
 
     pub fn potential_children_for(&self, parent: usize) -> Vec<usize> {

@@ -487,6 +487,35 @@ fn main() {
             }
         }
     }
+
+    use rand::prelude::*;
+
+    let mut rng = thread_rng();
+
+    let mut visited: FxHashSet<NodeId> = FxHashSet::default();
+
+    for (chain, parent) in chain_complex
+        .chains
+        .iter()
+        .zip(chain_complex.chains_parent.iter())
+    {
+        let r = rng.gen::<u8>();
+        let g = rng.gen::<u8>();
+        let b = rng.gen::<u8>();
+        let a = 255u8;
+
+        for (ix, node) in chain.chain.iter().enumerate() {
+            if ix == 0 && parent.is_none() {
+                println!("{}\t{}", node.0, node.0);
+            }
+
+            if !visited.insert(*node) {
+                continue;
+            }
+
+            println!("{}\t#{:2x}{:2x}{:2x}{:2x}", node.0, r, g, b, a);
+        }
+    }
 }
 
 fn main_() {

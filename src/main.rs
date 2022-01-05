@@ -87,118 +87,6 @@ pub fn len_to_pos(l: usize) -> f32 {
     (l as f32) / (BP_PER_UNIT as f32)
 }
 
-#[derive(Default, Clone)]
-pub struct Layout3D {
-    handle_vx: FxHashMap<Handle, usize>,
-
-    vertices: Vec<na::Vec3>,
-    links: FxHashMap<usize, usize>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct ChainIx {
-    chain_id: usize,
-    offset: usize,
-}
-
-// item is (&[Handle], &FxHashMap<(Handle, Handle), usize>)
-
-// or maybe... (Option<(Handle, Handle)>, &[Handle]) ????
-// pub struct ChainIter<'a> {
-//     chains: &'a Chains,
-// cur_id:
-// }
-
-pub struct BezierQuad {
-    p0: (f64, f64),
-    p1: (f64, f64),
-    p2: (f64, f64),
-}
-
-pub struct RadialLayout {
-    // this should probably be a curve of any length and complexity
-    curves: Vec<BezierQuad>,
-    structure: Vec<FxHashMap<(f64, f64), FxHashSet<usize>>>,
-}
-
-#[derive(Default, Clone, PartialEq, Eq)]
-pub struct Chain {
-    chain: Vec<Handle>,
-    left: Option<Handle>,
-    right: Option<Handle>,
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ChainRef<'a> {
-    chain: &'a [Handle],
-    left: Option<Handle>,
-    right: Option<Handle>,
-}
-
-#[derive(Default, Clone)]
-pub struct Chains {
-    // root is assumed to be index 0
-    // chains: Vec<Vec<Handle>>,
-    chains: Vec<Chain>,
-    structure: Vec<FxHashMap<(Handle, Handle), FxHashSet<usize>>>,
-
-    inv_map: FxHashMap<Handle, ChainIx>,
-}
-
-impl Chains {
-    pub fn len(&self) -> usize {
-        self.chains.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.chains.is_empty()
-    }
-
-    pub fn set_parent(
-        &mut self,
-        parent: usize,
-        range: (Handle, Handle),
-        child: usize,
-    ) {
-        let structure = &mut self.structure[parent];
-        structure.entry(range).or_default().insert(child);
-    }
-
-    // pub fn push_chain(&mut self, in_chain: &Chain) -> usize {
-    // pub fn push_chain(&mut self, in_chain: &ChainRef<'_>) -> usize {
-    pub fn push_chain(
-        &mut self,
-        in_chain: &[Handle],
-        left: Option<Handle>,
-        right: Option<Handle>,
-    ) -> usize {
-        // should we handle pre-placed handles here? probs not
-        // i'll just assume the input is correct
-
-        let ix = self.push_empty();
-
-        let chain = &mut self.chains[ix];
-
-        chain.left = left;
-        chain.right = right;
-
-        for &handle in in_chain {
-            chain.chain.push(handle);
-        }
-
-        ix
-    }
-
-    pub fn push_empty(&mut self) -> usize {
-        let ix = self.chains.len();
-
-        self.chains.push(Chain::default());
-        self.structure.push(FxHashMap::default());
-
-        ix
-    }
-}
-
 pub struct VecChain {
     vertices: Vec<na::Vec3>,
     links: Vec<(usize, usize)>,
@@ -292,7 +180,7 @@ impl VecChain {
     }
 }
 
-fn main() {
+fn main__() {
     use std::time::Instant;
     let args: Args = argh::from_env();
 
@@ -372,6 +260,129 @@ fn main() {
     eprintln!("|nodes| - |removed| + |inserted| = {}", s - r + i);
 }
 
+pub struct Chain {
+    chain: VecDeque<NodeId>,
+    left: FxHashSet<NodeId>,
+    right: FxHashSet<NodeId>,
+}
+
+fn main() {
+    use std::time::Instant;
+
+    let args: Args = argh::from_env();
+
+    eprintln!("loading graph");
+
+    let t0 = Instant::now();
+    let (graph, path_pos) = load_gfa(&args.gfa_path).unwrap();
+    eprintln!("loaded in {} s", t0.elapsed().as_secs_f64());
+
+    let mut stack: VecDeque<Handle> = VecDeque::new();
+
+    let mut remaining_nodes =
+        graph.handles().map(|h| h.id()).collect::<FxHashSet<_>>();
+
+    // let mut open_left = true;
+    // let mut open_right = true;
+    let mut current_chain: VecDeque<NodeId> = VecDeque::new();
+
+    let mut visited: FxHashSet<NodeId> = FxHashSet::default();
+
+    // let mut chains: Vec<VecDeque<NodeId>> = Vec::new();
+    let mut chains: Vec<Chain> = Vec::new();
+
+    let mut count = 0;
+
+    // let mut chain_complex = ChainComplex {
+    //     chains: Vec::new(),
+    //     chain_left_anchors: Vec::new(),
+    //     chain_right_anchors: Vec::new(),
+    // };
+
+    loop {
+        eprintln!(" - {}", count);
+        if let Some(&node) = remaining_nodes.iter().next() {
+            if visited.contains(&node) {
+                remaining_nodes.remove(&node);
+                continue;
+            }
+
+            current_chain.push_back(node);
+
+            let handle = Handle::pack(node, false);
+            let rev = handle.flip();
+
+            stack.push_back(handle);
+            stack.push_front(rev);
+
+            while let Some(cur) = stack.pop_back() {
+                remaining_nodes.remove(&cur.id());
+                visited.insert(cur.id());
+
+                if cur.is_reverse() {
+                    current_chain.push_front(cur.id());
+                } else {
+                    current_chain.push_back(cur.id());
+                }
+
+                let mut fwd_n = graph
+                    .neighbors(cur, Direction::Right)
+                    .filter(|h| !visited.contains(&h.id()))
+                    .collect::<Vec<_>>();
+
+                // continue with the longest neighboring node
+                fwd_n.sort_by_key(|&h| graph.node_len(h));
+                fwd_n.first().map(|&h| stack.push_back(h));
+            }
+
+            let nbors = |iter: &mut dyn Iterator<Item = &&NodeId>, rev| {
+                iter.flat_map(|&&n| {
+                    graph.neighbors(Handle::pack(n, rev), Direction::Right)
+                })
+                .map(|h| h.id())
+                .collect()
+            };
+
+            let left = nbors(&mut current_chain.back().iter(), true);
+            let right = nbors(&mut current_chain.front().iter(), false);
+
+            let chain = Chain {
+                chain: std::mem::take(&mut current_chain),
+                left,
+                right,
+            };
+
+            chains.push(chain);
+        } else {
+            break;
+        }
+
+        count += 1;
+    }
+
+    let mut longest_ix = 0;
+    let mut longest = 0;
+    for (ix, chain) in chains.iter().enumerate() {
+        if chain.chain.len() > longest {
+            longest_ix = ix;
+            longest = chain.chain.len();
+        }
+        eprintln!(" {:4} - {:?}", ix, chain.chain);
+    }
+
+    eprintln!(
+        "{:?}\t{:?}",
+        &chains[longest_ix].left, &chains[longest_ix].right
+    );
+    eprintln!(
+        "finished with {} chains after {} iterations",
+        chains.len(),
+        count
+    );
+
+    eprintln!("longest chain: {}", longest);
+}
+
 fn main_() {
     use std::time::Instant;
 
@@ -388,15 +399,6 @@ fn main_() {
     let mut pass = 0;
 
     let mut passes: Vec<Vec<NodeId>> = Vec::new();
-
-    // let (pass_edges, pass_nbors): (Vec<(NodeId, NodeId)>, Vec<FxHashSet<NodeId>>
-
-    // let mut pass_borders: Vec<(NodeId, NodeId)> = Vec::new();
-
-    // let mut remaining_marks =
-    //     graph.handles().map(|h| h.id()).collect::<Vec<_>>();
-    // let (mut remaining_nodes, mut marks): (Vec<_>, Vec<_>) =
-    //     graph.handles().map(|h| (h.id(), false)).unzip();
 
     let mut remaining_nodes =
         graph.handles().map(|h| h.id()).collect::<FxHashSet<_>>();

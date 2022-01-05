@@ -382,6 +382,40 @@ impl CurveComplex {
 }
 
 impl ChainComplex {
+    pub fn gfaestus_tsv<O: std::io::Write>(
+        &self,
+        write_labels: bool,
+        mut out: O,
+    ) -> Result<()> {
+        use rand::prelude::*;
+
+        let mut rng = thread_rng();
+
+        let mut visited: FxHashSet<NodeId> = FxHashSet::default();
+
+        for (chain, parent) in self.chains.iter().zip(self.chains_parent.iter())
+        {
+            let r = rng.gen::<u8>();
+            let g = rng.gen::<u8>();
+            let b = rng.gen::<u8>();
+            let a = 255u8;
+
+            for (ix, node) in chain.chain.iter().enumerate() {
+                if ix == 0 && parent.is_none() && write_labels {
+                    writeln!(out, "{}\t{}", node.0, node.0)?;
+                }
+
+                if !visited.insert(*node) {
+                    continue;
+                }
+
+                writeln!(out, "{}\t#{:2x}{:2x}{:2x}{:2x}", node.0, r, g, b, a)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn from_chains(graph: &PackedGraph, chains: Vec<Chain>) -> Self {
         let chains_children = vec![Vec::new(); chains.len()];
         let chains_parent = vec![None; chains.len()];
@@ -619,34 +653,8 @@ fn main() {
         }
     }
 
-    use rand::prelude::*;
-
-    let mut rng = thread_rng();
-
-    let mut visited: FxHashSet<NodeId> = FxHashSet::default();
-
-    for (chain, parent) in chain_complex
-        .chains
-        .iter()
-        .zip(chain_complex.chains_parent.iter())
-    {
-        let r = rng.gen::<u8>();
-        let g = rng.gen::<u8>();
-        let b = rng.gen::<u8>();
-        let a = 255u8;
-
-        for (ix, node) in chain.chain.iter().enumerate() {
-            if ix == 0 && parent.is_none() {
-                println!("{}\t{}", node.0, node.0);
-            }
-
-            if !visited.insert(*node) {
-                continue;
-            }
-
-            println!("{}\t#{:2x}{:2x}{:2x}{:2x}", node.0, r, g, b, a);
-        }
-    }
+    let stdout = std::io::stdout();
+    chain_complex.gfaestus_tsv(false, stdout).unwrap();
 }
 
 fn main_() {

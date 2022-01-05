@@ -272,12 +272,14 @@ pub struct ChainComplex {
 
     lens: Vec<usize>,
 
-    chain_children: Vec<Vec<usize>>,
+    chains_children: Vec<Vec<usize>>,
+    chains_parent: Vec<Option<usize>>,
 }
 
 impl ChainComplex {
     pub fn from_chains(graph: &PackedGraph, chains: Vec<Chain>) -> Self {
-        let chain_children = vec![Vec::new(); chains.len()];
+        let chains_children = vec![Vec::new(); chains.len()];
+        let chains_parent = vec![None; chains.len()];
 
         let mut max_len = 0;
 
@@ -304,8 +306,23 @@ impl ChainComplex {
         Self {
             chains,
             lens,
-            chain_children,
+            chains_children,
+            chains_parent,
         }
+    }
+
+    /// returns false if the child already had a parent, but does not
+    /// check whether the child is valid
+    pub fn attach_child(&mut self, parent: usize, child: usize) -> bool {
+        if self.chains_parent[child].is_some() {
+            return false;
+        }
+
+        let children = &mut self.chains_children[parent];
+        children.push(child);
+        self.chains_parent[child] = Some(parent);
+
+        true
     }
 
     pub fn potential_children_for(&self, parent: usize) -> Vec<usize> {
@@ -318,7 +335,7 @@ impl ChainComplex {
             .collect::<FxHashSet<_>>();
 
         for (ix, other) in self.chains.iter().enumerate() {
-            if ix == parent {
+            if ix == parent || self.chains_parent[ix].is_some() {
                 continue;
             }
 
@@ -460,23 +477,14 @@ fn main() {
         eprintln!("longest chain: {}", longest);
     }
 
-    let mut children: Vec<Vec<usize>> = Vec::new();
-    for (ix, chain) in chain_complex.chains.iter().enumerate() {
-        //
-        if chain.chain.len() < 10 {
-            break;
-        }
-        eprintln!(" {} - {}", ix, chain.chain.len());
-        let pot_children = chain_complex.potential_children_for(ix);
-        children.push(pot_children);
-    }
+    for parent in 0..chain_complex.chains.len() {
+        let pot_children = chain_complex.potential_children_for(parent);
 
-    eprintln!("-----------------------------");
-    children.reverse();
-
-    for (ix, children) in children.into_iter().enumerate() {
-        if !children.is_empty() {
-            eprintln!("{} - {}", ix, children.len());
+        for child in pot_children {
+            let result = chain_complex.attach_child(parent, child);
+            if result {
+                eprintln!("attached parent {} - child {}", parent, child);
+            }
         }
     }
 }

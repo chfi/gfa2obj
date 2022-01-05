@@ -296,6 +296,37 @@ pub struct CurveComplex {
 }
 
 impl CurveComplex {
+    pub fn curve_children(&self, chain_ix: usize) -> Vec<(usize, f32, f32)> {
+        let chain = &self.chain_complex.chains[chain_ix].chain;
+        let curve = &self.curves[chain_ix];
+        let total_len = curve.total_length;
+
+        let children = &self.chain_complex.chains_children[chain_ix];
+
+        let mut res = Vec::new();
+
+        for (child_ix, child_range) in children.iter() {
+            let si = child_range.start();
+            let ei = child_range.end();
+
+            let start = chain[*si];
+            let end = chain[*ei];
+
+            let (s_pos, s_len) = *curve.node_pos_offsets.get(&start).unwrap();
+            let (e_pos, e_len) = *curve.node_pos_offsets.get(&end).unwrap();
+
+            // let s = ((s_pos + s_len) as f32) / (total_len as f32);
+            // let e = ((e_pos + e_len) as f32) / (total_len as f32);
+
+            let s = (s_pos as f32) / (total_len as f32);
+            let e = (e_pos as f32) / (total_len as f32);
+
+            res.push((*child_ix, s, e));
+        }
+
+        res
+    }
+
     pub fn chain_complex_mut(&mut self) -> &mut ChainComplex {
         Arc::make_mut(&mut self.chain_complex)
     }

@@ -20,7 +20,7 @@ use na::{Vec2, Vec3};
 use parking_lot::Mutex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use argh::FromArgs;
@@ -382,6 +382,19 @@ impl CurveComplex {
 }
 
 impl ChainComplex {
+    pub fn connect_children(&mut self) {
+        for parent in 0..self.chains.len() {
+            let pot_children = self.potential_children_for(parent);
+
+            for child in pot_children {
+                let result = self.attach_child(parent, child);
+                if result {
+                    eprintln!("attached parent {} - child {}", parent, child);
+                }
+            }
+        }
+    }
+
     pub fn gfaestus_tsv<O: std::io::Write>(
         &self,
         write_labels: bool,
@@ -624,6 +637,7 @@ fn main() {
     }
 
     let mut chain_complex = ChainComplex::from_chains(&graph, chains);
+
     {
         let longest_ix = 0;
         let longest = &chain_complex.lens[0];
@@ -642,19 +656,29 @@ fn main() {
         eprintln!("longest chain: {}", longest);
     }
 
-    for parent in 0..chain_complex.chains.len() {
-        let pot_children = chain_complex.potential_children_for(parent);
+    chain_complex.connect_children();
 
-        for child in pot_children {
-            let result = chain_complex.attach_child(parent, child);
-            if result {
-                eprintln!("attached parent {} - child {}", parent, child);
-            }
+    {
+        let gfa_path = PathBuf::from(args.gfa_path.as_str());
+
+        let gfa_file_name =
+            gfa_path.file_name().and_then(|os| os.to_str()).unwrap();
+
+        let tsv_file_name = format!("{}.gfaestus.tsv", gfa_file_name);
+
+        let tsv_path = gfa_path.with_file_name(&tsv_file_name);
+
+        if let Ok(file) = std::fs::File::create(&tsv_path) {
+            let out = std::io::BufWriter::new(file);
+            chain_complex.gfaestus_tsv(false, out).unwrap();
         }
     }
 
-    let stdout = std::io::stdout();
-    chain_complex.gfaestus_tsv(false, stdout).unwrap();
+    // let stdout = std::io::stdout();
+    // chain_complex.gfaestus_tsv(false, stdout).unwrap();
+
+    let mut curve_complex =
+        CurveComplex::from_chain_complex(&graph, chain_complex);
 }
 
 fn main_() {

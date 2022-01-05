@@ -1,4 +1,5 @@
 use gfa::{gfa::GFA, optfields::OptFields};
+use gfa2obj::sparse::GetVectorElementList;
 #[allow(unused_imports)]
 use handlegraph::{
     handle::{Direction, Handle, NodeId},
@@ -310,10 +311,18 @@ fn main() {
         }
     }
 
-    let limit = 5;
+    let limit = 2;
 
     let snn_count = single_nucleotide_nodes.len();
     eprintln!("number of SNNs: {}", snn_count);
+
+    let mut result_count: Vec<usize> =
+        Vec::with_capacity(single_nucleotide_nodes.len());
+
+    let mut insert_count = 0;
+    let mut removed_count = 0;
+
+    let mut removed: FxHashSet<NodeId> = FxHashSet::default();
 
     let t0 = Instant::now();
     for (ix, id) in single_nucleotide_nodes.into_iter().enumerate() {
@@ -323,13 +332,44 @@ fn main() {
 
         let bfs_result =
             gfa2obj::sparse_graph::bfs(&adj_mat, id, Some(limit)).unwrap();
+
+        let n = bfs_result.number_of_stored_elements().unwrap();
+
+        let el_list = bfs_result.get_element_list().unwrap();
+
+        removed.insert(id);
+
+        for ix_ in el_list.indices_ref() {
+            // for val in  el_list.values_ref() {
+            let node_id = NodeId::from(ix_ + 1);
+            removed.insert(node_id);
+        }
+
+        result_count.push(n);
+
+        // removed_count += n;
+        insert_count += 1;
     }
+
+    insert_count /= 2;
+
     eprintln!(
         "limit {} BFSes across all {} SNNs took {} s",
         limit,
         snn_count,
         t0.elapsed().as_secs_f64()
     );
+
+    eprintln!("removed.len(): {}", removed.len());
+    eprintln!("insert_count: {}", insert_count);
+
+    eprintln!("graph node count: {}", segments.len());
+
+    let s = segments.len() as isize;
+    let r = removed.len() as isize;
+    let i = insert_count as isize;
+
+    eprintln!("|nodes| - |removed| + |inserted| = {}", s - r + i);
 }
 
 fn main_() {

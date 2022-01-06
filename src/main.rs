@@ -326,23 +326,85 @@ pub fn lerp(p0: na::Vec3, p1: na::Vec3, t: f32) -> na::Vec3 {
     p0 + d * t
 }
 
-pub fn triangle(p0: na::Vec3, p1: na::Vec3, height: f32, t: f32) -> na::Vec3 {
-    let p_t = lerp(p0, p1, t);
-    let h_t = (t - 0.5).abs();
-    // let h_t = (0.5 - height).abs()
-}
+// pub fn triangle(p0: na::Vec3, p1: na::Vec3, height: f32, t: f32) -> na::Vec3 {
+//     let p_t = lerp(p0, p1, t);
+//     let h_t = (t - 0.5).abs();
+//     // let h_t = (0.5 - height).abs()
+// }
 
 impl CurveComplex {
-    // just one height and curve function for now, operating on [0,1]
-    pub fn write_obj<W: std::io::Write, CurveGen, HeightGen>(
-        &self,
+    pub fn write_single_curve<W: std::io::Write, F>(
         mut out: W,
-        curve_gen: CurveGen,
-        height_gen: HeightGen,
+        height: F,
+        len: usize,
+        transform: Option<na::Mat3>,
     ) -> Result<()>
     where
-        CurveGen: Fn(na::Vec3, na::Vec3, f32) -> na::Vec3,
-        HeightGen: Fn(na::Vec3, na::Vec3, f32) -> na::Vec3,
+        F: Fn(f32) -> f32,
+    {
+        let mut vertices: Vec<na::Vec3> = Vec::new();
+
+        // let curve = Curve {
+        //     transform: transform.unwrap_or(na::identity()),
+        //     total_length: len,
+        //     node_pos_offsets: Default::default(),
+        // };
+
+        // let mut links: Vec<(usize, usize)> = Vec::new();
+
+        let poly_count = 25;
+
+        let transform = transform.unwrap_or(na::identity());
+
+        let curve_fn = |t: f32| {
+            let l = len as f32;
+
+            let x = 0.0;
+
+            let y = l * height(t);
+
+            let z = t * l;
+
+            let v = na::vec3(x, y, z);
+
+            transform * v
+        };
+
+        // vertices.push(na::zero());
+
+        for i in 0..=poly_count {
+            let t = (i as f32) / (poly_count as f32);
+            let p = curve_fn(t);
+            let this_ix = vertices.len();
+            vertices.push(p);
+        }
+
+        for v in vertices.iter() {
+            writeln!(out, "v {} {} {}", v.x, v.y, v.z)?;
+        }
+
+        write!(out, "l")?;
+        for i in 0..=poly_count {
+            let i = i + 1;
+            write!(out, " {}", i)?;
+        }
+        writeln!(out)?;
+
+        Ok(())
+    }
+
+    // just one height and curve function for now, operating on [0,1]
+    // the curve is used for chain 0,
+    // the height for chains i, i > 0,
+    pub fn write_obj<W: std::io::Write, F, H>(
+        &self,
+        mut out: W,
+        curve_0: F,
+        height: H,
+    ) -> Result<()>
+    where
+        F: Fn(f32) -> na::Vec3,
+        H: Fn(f32) -> f32,
     {
         let mut queue: VecDeque<(na::Mat3, usize)> = VecDeque::new();
         queue.push_back((na::identity(), 0));
@@ -671,6 +733,22 @@ impl ChainComplex {
 }
 
 fn main() {
+    let out = std::io::stdout();
+
+    // let height = |t: f32| t * t - 0.5 * t;
+
+    let height = |t: f32| (t * std::f32::consts::PI).sin();
+
+    let len = 16;
+    // let len = 16;
+
+    let transform = na::identity();
+
+    CurveComplex::write_single_curve(out, height, len, Some(transform))
+        .unwrap();
+}
+
+fn main_real() {
     // let spec = match (args.trace, args.debug, args.quiet) {
     //     (true, _, _) => "trace",
     //     (_, true, _) => "debug",

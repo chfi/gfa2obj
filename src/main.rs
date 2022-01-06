@@ -742,7 +742,31 @@ fn main() {
     let len = 16;
     // let len = 16;
 
-    let transform = na::identity();
+    let angle = 0.3;
+
+    #[rustfmt::skip]
+    let rot_xz = |d: f32| na::mat3(d.cos(), 0.0, -d.sin(),
+                                   0.0,     1.0,      0.0,
+                                   d.sin(), 0.0,  d.cos());
+
+    #[rustfmt::skip]
+    let rot_yz = |d: f32| na::mat3(1.0,     0.0,      0.0,
+                                   0.0, d.cos(), -d.sin(),
+                                   0.0, d.sin(),  d.cos());
+
+    let transform = rot_xz(0.3) * rot_yz(1.0);
+
+    let transform = na::mat3(
+        (0.3f32).cos(),
+        -(0.3f32).sin(),
+        0.0,
+        (0.3f32).sin(),
+        (0.3f32).cos(),
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ) * transform;
 
     CurveComplex::write_single_curve(out, height, len, Some(transform))
         .unwrap();

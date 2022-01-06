@@ -314,89 +314,6 @@ impl<T: Copy + PartialOrd> Anchor<T> {
     }
 }
 
-#[derive(Clone)]
-pub struct LineSampler {
-    min_sample_dist: f32,
-    fixed_samples: Vec<f32>,
-    offsets: Vec<f32>,
-}
-
-impl LineSampler {
-    pub fn sample_rank(&self, t: f32) -> usize {
-        let i_res =
-            self.offsets.binary_search_by(|v| t.partial_cmp(v).unwrap());
-
-        match i_res {
-            Ok(i) => i,
-            Err(i) => i.clamp(0, self.offsets.len() - 1),
-        }
-    }
-
-    fn build_offsets(min_dist: f32, fixed: &[f32], out: &mut Vec<f32>) {
-        out.clear();
-
-        let mut cur_t = 0.0;
-
-        out.push(cur_t);
-
-        for &pt in fixed {
-            assert!(cur_t <= 1.0);
-
-            let remaining = (pt - cur_t).abs();
-
-            let regulars = (remaining / min_dist).floor() as usize;
-
-            for _i in 0..regulars {
-                out.push(cur_t);
-                cur_t += min_dist;
-            }
-
-            out.push(pt);
-        }
-
-        out.sort_by(|a, b| a.partial_cmp(&b).unwrap());
-        out.dedup();
-    }
-
-    pub fn from_min_vertex_count(n: usize) -> Self {
-        let n = n.max(2) as f32;
-
-        let min_sample_dist = 1.0 / n;
-
-        // let fixed_samples = vec![];
-        let fixed_samples = vec![0.0, 1.0];
-
-        let mut offsets = Vec::new();
-
-        Self::build_offsets(min_sample_dist, &fixed_samples, &mut offsets);
-
-        Self {
-            min_sample_dist,
-            fixed_samples,
-            offsets,
-        }
-    }
-
-    pub fn push_samples(&mut self, samples: impl Iterator<Item = f32>) {
-        self.fixed_samples.extend(samples);
-        self.fixed_samples
-            .sort_by(|a, b| a.partial_cmp(&b).unwrap());
-        self.fixed_samples.dedup();
-
-        Self::build_offsets(
-            self.min_sample_dist,
-            &self.fixed_samples,
-            &mut self.offsets,
-        );
-    }
-}
-
-pub struct CurveComplex {
-    chain_complex: Arc<ChainComplex>,
-
-    curves: Vec<Curve>,
-}
-
 pub fn lerp(p0: na::Vec3, p1: na::Vec3, t: f32) -> na::Vec3 {
     let d = p1 - p0;
     let t = t.clamp(0.0, 1.0);
@@ -439,6 +356,12 @@ pub fn apply_curve(mat: na::Mat3, mut t: f32) -> na::Vec3 {
     // let z = ts.z * zcs.z;
 
     na::vec3(x, y, z)
+}
+
+pub struct CurveComplex {
+    chain_complex: Arc<ChainComplex>,
+
+    curves: Vec<Curve>,
 }
 
 impl CurveComplex {
@@ -971,18 +894,34 @@ fn main_test() {
 }
 
 fn main() {
-    let mut sampler = LineSampler::from_min_vertex_count(10);
+    let mut sampler = LineSampler::from_min_vertex_count(3);
+
+    // for (i, v) in sampler.offsets.iter().enumerate() {
+    //     println!("{} - {}", i, v);
+    // }
+
+    for i in 0..=19 {
+        let t = (i as f32) / 19.0;
+
+        println!("{} - {} -> {}", i, t, sampler.sample(t));
+    }
+
+    println!("--------------------");
+
+    // sampler.push_samples([0.111222, 0.222111, 0.621212].into_iter());
+    sampler.push_samples([0.111222, 0.222111, 0.921212].into_iter());
 
     for (i, v) in sampler.offsets.iter().enumerate() {
         println!("{} - {}", i, v);
     }
 
-    println!("--------------------");
+    println!("---------------------");
 
-    sampler.push_samples([0.111222, 0.222111, 0.121212].into_iter());
+    for i in 0..=19 {
+        let t = (i as f32) / 19.0;
 
-    for (i, v) in sampler.offsets.iter().enumerate() {
-        println!("{} - {}", i, v);
+        // println!("{} - {} -> {}", i, t, sampler.sample_rank(t));
+        println!("{} - {} -> {}", i, t, sampler.sample(t));
     }
 }
 

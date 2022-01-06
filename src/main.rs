@@ -314,6 +314,83 @@ impl<T: Copy + PartialOrd> Anchor<T> {
     }
 }
 
+#[derive(Clone)]
+pub struct LineSampler {
+    min_sample_dist: f32,
+    fixed_samples: Vec<f32>,
+    offsets: Vec<f32>,
+}
+
+impl LineSampler {
+    pub fn sample_rank(&self, t: f32) -> usize {
+        let i_res =
+            self.offsets.binary_search_by(|v| t.partial_cmp(v).unwrap());
+
+        match i_res {
+            Ok(i) => i,
+            Err(i) => i.clamp(0, self.offsets.len() - 1),
+        }
+    }
+
+    fn build_offsets(min_dist: f32, fixed: &[f32], out: &mut Vec<f32>) {
+        out.clear();
+
+        let mut cur_t = 0.0;
+
+        out.push(cur_t);
+
+        for &pt in fixed {
+            assert!(cur_t <= 1.0);
+
+            let remaining = (pt - cur_t).abs();
+
+            let regulars = (remaining / min_dist).floor() as usize;
+
+            for _i in 0..regulars {
+                out.push(cur_t);
+                cur_t += min_dist;
+            }
+
+            out.push(pt);
+        }
+
+        out.sort_by(|a, b| a.partial_cmp(&b).unwrap());
+        out.dedup();
+    }
+
+    pub fn from_min_vertex_count(n: usize) -> Self {
+        let n = n.max(2) as f32;
+
+        let min_sample_dist = 1.0 / n;
+
+        // let fixed_samples = vec![];
+        let fixed_samples = vec![0.0, 1.0];
+
+        let mut offsets = Vec::new();
+
+        Self::build_offsets(min_sample_dist, &fixed_samples, &mut offsets);
+
+        Self {
+            min_sample_dist,
+            fixed_samples,
+            offsets,
+        }
+    }
+
+    pub fn push_samples(&mut self, samples: impl Iterator<Item = f32>) {
+        self.fixed_samples.extend(samples);
+        self.fixed_samples
+            .sort_by(|a, b| a.partial_cmp(&b).unwrap());
+        self.fixed_samples.dedup();
+
+        Self::build_offsets(
+            self.min_sample_dist,
+            &self.fixed_samples,
+            &mut self.offsets,
+        );
+    }
+}
+
 pub struct CurveComplex {
     chain_complex: Arc<ChainComplex>,
 
@@ -332,49 +409,81 @@ pub fn lerp(p0: na::Vec3, p1: na::Vec3, t: f32) -> na::Vec3 {
 //     // let h_t = (0.5 - height).abs()
 // }
 
+#[rustfmt::skip]
+pub fn default_mat() -> na::Mat3 {
+    // no local horizontal component,
+    // quadratic vertical component,
+    // linear length component,
+    na::mat3(0.0, 0.0, 0.0,
+            -1.0, 0.0, 1.0,
+             0.0, 0.0, 1.0)
+}
+
+pub fn apply_curve(mat: na::Mat3, mut t: f32) -> na::Vec3 {
+    t = t.clamp(0.0, 1.0);
+
+    let ts = na::vec3(t * t, t, 1.0);
+
+    let out = mat * ts;
+
+    let x = out.x;
+    let y = out.y;
+    let z = out.z;
+
+    // let xcs = mat.column(0);
+    // let ycs = mat.column(1);
+    // let zcs = mat.column(2);
+
+    // let x = 0.0;
+    // let y = ycs.dot(&ts);
+    // let z = ts.z * zcs.z;
+
+    na::vec3(x, y, z)
+}
+
 impl CurveComplex {
+    pub fn transform_to_curve<F: Fn(f32) -> f32>(
+        mat: na::Mat3,
+        height: F,
+        l: f32,
+    ) -> impl Fn(f32) -> na::Vec3 {
+        let curve_fn = move |t: f32| {
+            let x = 0.0;
+            let y = l * height(t);
+            let z = t * l;
+
+            // let y = height(t);
+            // let z = t;
+            // let y = height(t * l);
+            // let z = t * l;
+            let v = na::vec3(x, y, z);
+            mat * v
+        };
+
+        curve_fn
+    }
+
     pub fn write_single_curve<W: std::io::Write, F>(
         mut out: W,
-        height: F,
-        len: usize,
+        offset: &mut usize,
+        curve_fn: F,
+        origin: na::Vec3,
         transform: Option<na::Mat3>,
     ) -> Result<()>
     where
-        F: Fn(f32) -> f32,
+        F: Fn(f32) -> na::Vec3,
     {
         let mut vertices: Vec<na::Vec3> = Vec::new();
-
-        // let curve = Curve {
-        //     transform: transform.unwrap_or(na::identity()),
-        //     total_length: len,
-        //     node_pos_offsets: Default::default(),
-        // };
-
-        // let mut links: Vec<(usize, usize)> = Vec::new();
 
         let poly_count = 25;
 
         let transform = transform.unwrap_or(na::identity());
 
-        let curve_fn = |t: f32| {
-            let l = len as f32;
-
-            let x = 0.0;
-
-            let y = l * height(t);
-
-            let z = t * l;
-
-            let v = na::vec3(x, y, z);
-
-            transform * v
-        };
-
-        // vertices.push(na::zero());
+        // let curve_fn = Self::transform_to_curve(transform, height, len as f32);
 
         for i in 0..=poly_count {
             let t = (i as f32) / (poly_count as f32);
-            let p = curve_fn(t);
+            let p = curve_fn(t) + origin;
             let this_ix = vertices.len();
             vertices.push(p);
         }
@@ -382,32 +491,57 @@ impl CurveComplex {
         for v in vertices.iter() {
             writeln!(out, "v {} {} {}", v.x, v.y, v.z)?;
         }
+        let mut new_offset = *offset;
 
         write!(out, "l")?;
         for i in 0..=poly_count {
-            let i = i + 1;
+            let i = i + *offset;
+            new_offset += 1;
             write!(out, " {}", i)?;
         }
+
+        *offset = new_offset;
+
         writeln!(out)?;
 
         Ok(())
     }
 
+    /*
+    pub fn write_hierarchy<W: std::io::Write, F>(
+        mut out: W,
+        height: F,
+    ) -> Result<()>
+    where
+        F: Fn(f32) -> f32,
+    {
+        fn curve_gen(
+            mat: na::Mat3,
+            origin: na::Vec3,
+        ) -> impl Fn(f32) -> na::Vec3 {
+
+
+
+
+        }
+
+        Ok(())
+    }
+    */
+
     // just one height and curve function for now, operating on [0,1]
     // the curve is used for chain 0,
     // the height for chains i, i > 0,
-    pub fn write_obj<W: std::io::Write, F, H>(
+    pub fn write_obj<W: std::io::Write, F>(
         &self,
         mut out: W,
-        curve_0: F,
-        height: H,
+        height: F,
     ) -> Result<()>
     where
-        F: Fn(f32) -> na::Vec3,
-        H: Fn(f32) -> f32,
+        F: Fn(f32) -> f32,
     {
-        let mut queue: VecDeque<(na::Mat3, usize)> = VecDeque::new();
-        queue.push_back((na::identity(), 0));
+        let mut queue: VecDeque<(na::Vec3, na::Mat3, usize)> = VecDeque::new();
+        queue.push_back((na::zero(), na::identity(), 0));
 
         let mut visited: FxHashSet<usize> = FxHashSet::default();
 
@@ -418,14 +552,47 @@ impl CurveComplex {
 
         // let curve_0 =
 
-        let left_0 = na::zero();
-        let right_0 = na::vec3(0.0, 0.0, self.curves[0].total_length as f32);
+        // let left_0 = na::zero();
+        // let right_0 = na::vec3(0.0, 0.0, self.curves[0].total_length as f32);
 
-        curve_endpoints[0] = (left_0, right_0);
+        // curve_endpoints[0] = (left_0, right_0);
 
         let chain_complex = &self.chain_complex;
 
-        while let Some((transform, parent_ix)) = queue.pop_front() {
+        let height = Arc::new(height);
+
+        let mut offset = 1;
+
+        let curve_fn = Self::transform_to_curve(
+            na::identity(),
+            height.as_ref(),
+            self.curves[0].total_length as f32,
+        );
+
+        Self::write_single_curve(
+            &mut out,
+            &mut offset,
+            curve_fn,
+            na::zero(),
+            None,
+        )?;
+
+        #[rustfmt::skip]
+        let rot_xy = |d: f32| na::mat3(d.cos(), -d.sin(), 0.0,
+                                       d.sin(),  d.cos(), 0.0,
+                                       0.0,         0.0,  1.0);
+
+        #[rustfmt::skip]
+        let rot_xz = |d: f32| na::mat3(d.cos(), 0.0, -d.sin(),
+                                       0.0,     1.0,      0.0,
+                                       d.sin(), 0.0,  d.cos());
+
+        #[rustfmt::skip]
+        let rot_yz = |d: f32| na::mat3(1.0,     0.0,      0.0,
+                                       0.0, d.cos(), -d.sin(),
+                                       0.0, d.sin(),  d.cos());
+
+        while let Some((origin, transform, parent_ix)) = queue.pop_front() {
             if !visited.insert(parent_ix) {
                 continue;
             }
@@ -435,30 +602,51 @@ impl CurveComplex {
             let curve = &self.curves[parent_ix];
 
             let new_transform = transform * curve.transform;
-
-            // self.curve_children(chain_ix)
-            // let curve_anchors = self.curve_anchors(parent_ix);
+            // let new_transform = transform * curve.transform;
 
             let curve_children = self.curve_children(parent_ix);
 
-            for (child_ix, t0, t1) in curve_children {
+            for &(child_ix, t0, t1) in curve_children.iter() {
                 let child = &self.curves[child_ix];
 
-                // let p0 =
+                let curve_fn = Self::transform_to_curve(
+                    new_transform,
+                    height.as_ref(),
+                    curve.total_length as f32,
+                );
 
-                queue.push_back((new_transform, child_ix));
-                // let connect = t1 - t0;
+                let p0 = curve_fn(t0);
+                let p1 = curve_fn(t1);
 
-                // curve_endpoints[child_ix] = (t0, t1);
+                // let origin = p0 + origin;
 
-                // let p0 =
+                let v = p1 - p0;
+
+                let origin = origin + v;
+
+                let theta = (v.z).atan2(v.y);
+                let alpha = (v.x).atan2(v.z);
+
+                let local = new_transform * rot_yz(alpha) * rot_xz(theta);
+                // rot_yz(alpha) * rot_xz(theta) * new_transform;
+
+                let angle = (child_ix as f32) / (curve_children.len() as f32);
+
+                let local = rot_xz(angle * std::f32::consts::TAU) * local;
+                // rot_xz(angle * std::f32::consts::TAU) * new_transform;
+                // let local =
+                //     new_transform * rot_yz(angle * std::f32::consts::TAU);
+
+                Self::write_single_curve(
+                    &mut out,
+                    &mut offset,
+                    curve_fn,
+                    origin,
+                    Some(local),
+                )?;
+
+                queue.push_back((origin, local, child_ix));
             }
-
-            // let p_curve = &self.curve_anchors(parent_ix)
-
-            // for child in
-
-            // push children back
         }
 
         // while let Some(val) = queue.
@@ -732,7 +920,7 @@ impl ChainComplex {
     }
 }
 
-fn main() {
+fn main_test() {
     let out = std::io::stdout();
 
     // let height = |t: f32| t * t - 0.5 * t;
@@ -768,8 +956,34 @@ fn main() {
         1.0,
     ) * transform;
 
-    CurveComplex::write_single_curve(out, height, len, Some(transform))
-        .unwrap();
+    /*
+
+    CurveComplex::write_single_curve(
+        out,
+        &mut 1,
+        height,
+        len,
+        na::zero(),
+        Some(transform),
+    )
+    .unwrap();
+    */
+}
+
+fn main() {
+    let mut sampler = LineSampler::from_min_vertex_count(10);
+
+    for (i, v) in sampler.offsets.iter().enumerate() {
+        println!("{} - {}", i, v);
+    }
+
+    println!("--------------------");
+
+    sampler.push_samples([0.111222, 0.222111, 0.121212].into_iter());
+
+    for (i, v) in sampler.offsets.iter().enumerate() {
+        println!("{} - {}", i, v);
+    }
 }
 
 fn main_real() {
@@ -917,54 +1131,84 @@ fn main_real() {
         }
     }
 
-    // let stdout = std::io::stdout();
-    // chain_complex.gfaestus_tsv(false, stdout).unwrap();
-
     let mut curve_complex =
         CurveComplex::from_chain_complex(&graph, chain_complex);
 
-    let mut anchors = Vec::new();
-    let mut children_ranks = Vec::new();
+    let height = |t: f32| (t * std::f32::consts::PI).sin();
 
+    let stdout = std::io::stdout();
+    curve_complex.write_obj(stdout, height).unwrap();
+    // chain_complex.gfaestus_tsv(false, stdout).unwrap();
+
+    // let mut anchors = Vec::new();
+    // let mut children_ranks = Vec::new();
+
+    // let mut curves_: Vec<(Arc<dyn Fn(f32) -> f32>, usize, na::Mat3)> =
+    //     Vec::new();
+
+    // height: F,
+    // len: usize,
+    // transform: Option<na::Mat3>,
+
+    /*
     for parent_ix in 0..curve_complex.curves.len() {
         let chain_complex = &curve_complex.chain_complex;
         let chains = &chain_complex.chains;
 
         let curve_anchors = curve_complex.curve_anchors(parent_ix);
 
-        let mut ranks = curve_anchors
-            .iter()
-            .map(|a| {
-                let (_f, i) = a.t();
-                i
-            })
-            .collect::<Vec<_>>();
+        let curve = &curve_complex.curves[parent_ix];
 
-        ranks.sort();
-        // map from chain index to rank
-        let ranks: FxHashMap<usize, usize> = ranks
-            .into_iter()
-            .enumerate()
-            .map(|(rank, chain_ix)| (chain_ix, rank))
-            .collect();
+        let l = curve.total_length;
+        let mat = na::identity();
 
-        // map from child chain index to angle -- angle, not t!
-        /*
-        let angles: FxHashMap<usize, f32> = ranks
-            .iter()
-            .map(|(chain_ix, rank)| {
-                let mut angle = (*rank as f32) / ranks.len() as f32;
-                angle *= std::f32::consts::TAU;
+        let h = if parent_ix == 0 {
+            Box::new(|_| 0.0f32) as Box<_>
+        } else {
+            let height = |t: f32| (t * std::f32::consts::PI).sin();
+            Box::new(height) as Box<_>
+        };
 
-                (*chain_ix, angle)
-            })
-            .collect();
-        */
+        curves_.push((h, l, mat));
+    */
 
+    /*
+    let mut ranks = curve_anchors
+        .iter()
+        .map(|a| {
+            let (_f, i) = a.t();
+            i
+        })
+        .collect::<Vec<_>>();
+
+    ranks.sort();
+    // map from chain index to rank
+    let ranks: FxHashMap<usize, usize> = ranks
+        .into_iter()
+        .enumerate()
+        .map(|(rank, chain_ix)| (chain_ix, rank))
+        .collect();
+    */
+
+    // map from child chain index to angle -- angle, not t!
+    /*
+    let angles: FxHashMap<usize, f32> = ranks
+        .iter()
+        .map(|(chain_ix, rank)| {
+            let mut angle = (*rank as f32) / ranks.len() as f32;
+            angle *= std::f32::consts::TAU;
+
+            (*chain_ix, angle)
+        })
+        .collect();
+    */
+
+    /*
         children_ranks.push(ranks);
 
         anchors.push(curve_anchors);
-    }
+    */
+    // }
 }
 
 fn main_() {

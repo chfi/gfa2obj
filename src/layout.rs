@@ -10,6 +10,10 @@ pub struct LineSampler {
 }
 
 impl LineSampler {
+    pub fn sample_points(&self) -> &[f32] {
+        &self.offsets
+    }
+
     pub fn sample(&self, t: f32) -> f32 {
         if t == 0.0 || t == 1.0 {
             return t;
@@ -117,6 +121,8 @@ pub struct CurveNetwork {
 
     curve_endpoints: Vec<(VxVar, VxVar)>,
     curve_fns: Vec<CurveFn>,
+    curve_samples: Vec<LineSampler>,
+    // curve_transforms: Vec<na::Mat3>,
 }
 
 impl CurveNetwork {
@@ -129,13 +135,49 @@ impl CurveNetwork {
         self.curve_endpoints.push((p0_, p1_));
         self.curve_fns.push(ZERO_CURVE_FN.clone());
 
+        let min_vx_count = 5;
+
+        self.curve_samples
+            .push(LineSampler::from_min_vertex_count(min_vx_count));
+
         CurveId(i)
+    }
+
+    pub fn set_curve_fn(&mut self, curve: CurveId, f: CurveFn) {
+        self.curve_fns[curve.0] = f;
+    }
+
+    // returns None if one of the endpoints haven't been assigned yet
+    pub fn sample_curve(&self, curve: CurveId, t: f32) -> Option<na::Vec3> {
+        let (s, e) = self.curve_endpoints[curve.0];
+
+        let start = self.read_vx_var(s)?;
+        let end = self.read_vx_var(e)?;
+
+        let len = (end - start).norm();
+
+        #[rustfmt::skip]
+        let mat = na::mat3(1.0, 0.0, 0.0,
+                           0.0, 1.0, 0.0,
+                           0.0, 0.0, len);
+
+        let pre = (self.curve_fns[curve.0])(t);
+
+        Some(mat * pre)
+    }
+
+    pub fn curve_endpoints(&self, curve: CurveId) -> (VxVar, VxVar) {
+        self.curve_endpoints[curve.0]
     }
 
     pub fn new_vertex(&mut self) -> VxId {
         let i = self.vertices.len();
         self.vertices.push(na::zero());
         VxId(i)
+    }
+
+    pub fn set_vertex(&mut self, i: VxId, new: na::Vec3) {
+        self.vertices[i.0] = new;
     }
 
     pub fn new_vertex_var(&mut self) -> VxVar {
@@ -157,10 +199,72 @@ impl CurveNetwork {
         }
     }
 
+    pub fn read_vx_var(&self, var: VxVar) -> Option<na::Vec3> {
+        let ix = *self.vertex_variables.get(var.0)?;
+        let ix = ix?;
+        self.vertices.get(ix).copied()
+    }
+
     pub fn is_assigned(&self, var: VxVar) -> bool {
         self.vertex_variables
             .get(var.0)
             .map(|v| v.is_some())
             .unwrap_or_default()
+    }
+
+    pub fn reify(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
+        let curve_n = self.curve_endpoints.len();
+
+        let mut vertices = Vec::new();
+        let mut lines = Vec::new();
+
+        for curve_ix in 0..curve_n {
+            let (start, end) = self.curve_endpoints[curve_ix];
+
+            // only reify curves with actual vertex endpoints
+            if !self.is_assigned(start) || !self.is_assigned(end) {
+                continue;
+            }
+
+            let mut cur_line = Vec::new();
+
+            let curve_fn = &self.curve_fns[curve_ix];
+            let sampler = &self.curve_samples[curve_ix];
+            // let mat = &self.curve_transforms[curve_ix];
+
+            let ts = sampler.sample_points();
+
+            for &t in ts {
+                let p = curve_fn(t);
+                let i = vertices.len();
+                vertices.push(p);
+                cur_line.push(i + 1);
+            }
+
+            lines.push(cur_line);
+        }
+
+        (vertices, lines)
+    }
+
+    pub fn write_obj<W: std::io::Write>(
+        &self,
+        mut out: W,
+    ) -> anyhow::Result<()> {
+        let (vertices, lines) = self.reify();
+
+        for v in vertices {
+            writeln!(out, "v {} {} {}", v.x, v.y, v.z)?;
+        }
+
+        for line in lines {
+            write!(out, "l")?;
+            for ix in line {
+                write!(out, " {}", ix)?;
+            }
+            writeln!(out)?;
+        }
+
+        Ok(())
     }
 }

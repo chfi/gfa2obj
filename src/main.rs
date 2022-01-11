@@ -927,6 +927,9 @@ fn main() {
     curve_net.set_vertex(v0, na::zero());
     curve_net.set_vertex(v1, na::vec3(0.0, 0.0, 10.0));
     curve_net.set_vertex(v2, na::vec3(10.0, 0.0, 0.0));
+
+    curve_net.set_vertex_to_curve(v3, curve_1, 0.3);
+    curve_net.set_vertex_to_curve(v4, curve_0, 0.5);
     // curve_net.set_vertex(v1, na::vec3(0.0, 10.0, 0.0));
 
     /*
@@ -967,9 +970,13 @@ fn main() {
     curve_net.assign(s2, v2);
     curve_net.assign(e2, v0);
 
-    eprintln!("v0 - {}", curve_net.get_vx(v0));
-    eprintln!("v1 - {}", curve_net.get_vx(v1));
-    eprintln!("v2 - {}", curve_net.get_vx(v2));
+    let (s3, e3) = curve_net.curve_endpoints(curve_3);
+    curve_net.assign(s3, v3);
+    curve_net.assign(e3, v4);
+
+    eprintln!("v0 - {:?}", curve_net.get_vx(v0));
+    eprintln!("v1 - {:?}", curve_net.get_vx(v1));
+    eprintln!("v2 - {:?}", curve_net.get_vx(v2));
     // eprintln!("v3 - {}", curve_net.get_vx(v3));
     // eprintln!("v4 - {}", curve_net.get_vx(v4));
 

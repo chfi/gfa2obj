@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
+use nalgebra::RealField;
 use nalgebra_glm as na;
 
 #[derive(Clone)]
@@ -105,6 +106,12 @@ pub struct VxVar(usize);
 #[repr(transparent)]
 pub struct CurveId(usize);
 
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub enum CurveVx {
+    Vec3(na::Vec3),
+    Curve { curve: CurveId, t: f32 },
+}
+
 pub type CurveFn = Arc<dyn Fn(f32) -> na::Vec3 + Send + Sync + 'static>;
 
 lazy_static::lazy_static! {
@@ -114,9 +121,119 @@ lazy_static::lazy_static! {
     };
 }
 
+pub struct CurveLayout {
+    vertices: Vec<na::Vec3>,
+
+    curve_endpoints: Vec<(usize, usize)>,
+    curve_fns: Vec<CurveFn>,
+    // curve_samples: Vec<LineSampler>,
+}
+
+impl CurveLayout {
+    pub fn new_curve(&mut self, p0: na::Vec3, p1: na::Vec3) -> CurveId {
+        let i = self.curve_endpoints.len();
+
+        let vi = self.vertices.len();
+        self.vertices.push(p0);
+        self.vertices.push(p1);
+
+        self.curve_endpoints.push((vi, vi + 1));
+        self.curve_fns.push(ZERO_CURVE_FN.clone());
+
+        CurveId(i)
+    }
+
+    pub fn add_child_curve(
+        &mut self,
+        parent: CurveId,
+        t0: f32,
+        t1: f32,
+    ) -> CurveId {
+        let (start_i, end_i) = self.curve_endpoints[parent.0];
+
+        let p_p0 = self.vertices[start_i];
+        let p_p1 = self.vertices[end_i];
+
+        let cfn = &self.curve_fns[parent.0];
+
+        let parent_mat = Self::transformation_matrix(p_p0, p_p1);
+
+        let c_t0 = p_p0 + parent_mat * cfn(t0);
+        let c_t1 = p_p0 + parent_mat * cfn(t1);
+
+        let child_i = self.curve_endpoints.len();
+
+        let vi = self.vertices.len();
+        self.vertices.push(c_t0);
+        self.vertices.push(c_t1);
+
+        self.curve_endpoints.push((vi, vi + 1));
+        self.curve_fns.push(ZERO_CURVE_FN.clone());
+
+        CurveId(child_i)
+    }
+
+    // pub fn transformation_matrix(v0: na::Vec3, v1: na::Vec3) -> na::Mat4 {
+    pub fn transformation_matrix(p0: na::Vec3, p1: na::Vec3) -> na::Mat3 {
+        // #[rustfmt::skip]
+        // let rot_xy = |d: f32| na::mat3(d.cos(), -d.sin(), 0.0,
+        //                                d.sin(),  d.cos(), 0.0,
+        //                                0.0,         0.0,  1.0);
+
+        #[rustfmt::skip]
+        let rot_xz = |d: f32| na::mat3(d.cos(), 0.0, -d.sin(),
+                                       0.0,     1.0,      0.0,
+                                       d.sin(), 0.0,  d.cos());
+
+        #[rustfmt::skip]
+        let rot_yz = |d: f32| na::mat3(1.0,     0.0,      0.0,
+                                       0.0, d.cos(), -d.sin(),
+                                       0.0, d.sin(),  d.cos());
+
+        let cdel = p1 - p0;
+
+        let theta = cdel.z.atan2(cdel.x);
+        let alpha = cdel.y.atan2(cdel.z);
+
+        let z_scale = p1.metric_distance(&p1);
+
+        let rots = rot_yz(alpha) * rot_xz(theta);
+
+        #[rustfmt::skip]
+        let scale = na::mat3(1.0, 0.0, 0.0,
+                             0.0, 1.0, 0.0,
+                             0.0, 0.0, z_scale);
+
+        let mat = rots * scale;
+
+        mat
+    }
+
+    /*
+    pub fn reify(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
+        let curve_n = self.curve_endpoints.len();
+
+        let mut vertices = Vec::new();
+        let mut lines = Vec::new();
+
+        for curve_ix in 0..curve_n {
+            let (start_i, end_i) = self.curve_endpoints[curve_ix];
+
+            let p0 = self.vertices[start_i];
+            let p1 = self.vertices[end_i];
+
+            let mat = Self::transformation_matrix(p0, p1);
+
+            // let translation = na::translation(p0);
+        }
+    }
+    */
+}
+
 #[derive(Default)]
 pub struct CurveNetwork {
-    pub vertices: Vec<na::Vec3>,
+    // pub vertices: Vec<na::Vec3>,
+    vertices: Vec<CurveVx>,
 
     vertex_variables: Vec<Option<usize>>,
 
@@ -200,12 +317,22 @@ impl CurveNetwork {
 
     pub fn new_vertex(&mut self) -> VxId {
         let i = self.vertices.len();
-        self.vertices.push(na::zero());
+        self.vertices.push(CurveVx::Vec3(na::zero()));
         VxId(i)
     }
 
     pub fn set_vertex(&mut self, i: VxId, new: na::Vec3) {
-        self.vertices[i.0] = new;
+        self.vertices[i.0] = CurveVx::Vec3(new);
+    }
+
+    // pub fn set_vertex_to_curve(&mut self, i: VxId, curve: CurveId, t: f32) {
+    //     self.vertices[i.0] = CurveVx::Curve { curve, t };
+    // }
+
+    pub fn set_vertex_to_curve(&mut self, i: VxId, curve: CurveId, t: f32) {
+        let v = (&self.curve_fns[curve.0])(t);
+        self.vertices[i.0] = CurveVx::Vec3(v);
+        // self.vertices[i.0] = CurveVx::Curve { curve, t };
     }
 
     pub fn new_vertex_var(&mut self) -> VxVar {
@@ -227,14 +354,35 @@ impl CurveNetwork {
         }
     }
 
-    pub fn get_vx(&self, v: VxId) -> na::Vec3 {
-        self.vertices[v.0]
+    // only returns "concrete" vertices, not ones defined relative to
+    // a curve
+    pub fn get_vx(&self, v: VxId) -> Option<na::Vec3> {
+        match self.vertices[v.0] {
+            CurveVx::Vec3(v) => Some(v),
+            CurveVx::Curve { curve, t } => {
+                let (start, end) = self.curve_endpoints(curve);
+                if t == 0.0 {
+                    self.read_vx_var(start)
+                } else if t == 1.0 {
+                    self.read_vx_var(end)
+                } else {
+                    // let s = self.read_vx_var(start)?;
+                    // let e = self.read_vx_var(end)?;
+                    let curve = &self.curve_fns[curve.0];
+                    Some(curve(t))
+                }
+            }
+        }
     }
 
     pub fn read_vx_var(&self, var: VxVar) -> Option<na::Vec3> {
         let ix = *self.vertex_variables.get(var.0)?;
         let ix = ix?;
-        self.vertices.get(ix).copied()
+        let v = self.vertices.get(ix).copied()?;
+        match v {
+            CurveVx::Vec3(v) => Some(v),
+            CurveVx::Curve { .. } => None,
+        }
     }
 
     pub fn is_assigned(&self, var: VxVar) -> bool {
@@ -247,16 +395,30 @@ impl CurveNetwork {
     pub fn reify(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
         let curve_n = self.curve_endpoints.len();
 
+        let mut curve_dequeue: VecDeque<usize> = VecDeque::new();
+
+        for curve_ix in 0..curve_n {
+            curve_dequeue.push_back(curve_ix);
+        }
+
         let mut vertices = Vec::new();
         let mut lines = Vec::new();
 
-        for curve_ix in 0..curve_n {
+        while let Some(curve_ix) = curve_dequeue.pop_front() {
             let (start, end) = self.curve_endpoints[curve_ix];
 
             // only reify curves with actual vertex endpoints
             if !self.is_assigned(start) || !self.is_assigned(end) {
                 continue;
             }
+            /*
+            else if !self.is_concrete(start) || !self.is_concrete(end) {
+                // if one of the endpoints haven't been assigned, do
+                // this curve later
+                eprintln!("pushing curve {:?}", curve_ix);
+                curve_dequeue.push_back(curve_ix);
+            }
+            */
 
             let v0 = self.read_vx_var(start).unwrap_or_default();
             let v1 = self.read_vx_var(end).unwrap_or_default();
@@ -277,51 +439,6 @@ impl CurveNetwork {
 
         (vertices, lines)
     }
-
-    /*
-    pub fn reify(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
-        let curve_n = self.curve_endpoints.len();
-
-        let mut vertices = Vec::new();
-        let mut lines = Vec::new();
-
-        for curve_ix in 0..curve_n {
-            let (start, end) = self.curve_endpoints[curve_ix];
-
-            // only reify curves with actual vertex endpoints
-            if !self.is_assigned(start) || !self.is_assigned(end) {
-                continue;
-            }
-
-            let mut cur_line = Vec::new();
-
-            // let curve_fn = &self.curve_fns[curve_ix];
-            let sampler = &self.curve_samples[curve_ix];
-            // let mat = &self.curve_transforms[curve_ix];
-
-            let ts = sampler.sample_points();
-
-            let p0 = self.sample_curve(CurveId(curve_ix), 0.0).unwrap();
-
-            for &t in ts {
-                let p = self.sample_curve(CurveId(curve_ix), t).unwrap();
-
-                let del = p - p0;
-
-                let p = del + p;
-
-                // let p = curve_fn(t);
-                let i = vertices.len();
-                vertices.push(p);
-                cur_line.push(i + 1);
-            }
-
-            lines.push(cur_line);
-        }
-
-        (vertices, lines)
-    }
-    */
 
     pub fn write_obj<W: std::io::Write>(
         &self,

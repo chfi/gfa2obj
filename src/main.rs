@@ -1,7 +1,7 @@
 use flexi_logger::{Duplicate, FileSpec, Logger};
 use gfa::{gfa::GFA, optfields::OptFields};
 use gfa2obj::{
-    layout::{CurveFn, CurveNetwork},
+    layout::{CurveFn, CurveLayout, CurveNetwork},
     sparse::GetVectorElementList,
 };
 #[allow(unused_imports)]
@@ -906,6 +906,15 @@ fn main_test() {
 }
 
 fn main() {
+    let mut curves = CurveLayout::default();
+
+    let curve_0 =
+        curves.new_curve(na::vec3(0.0, 0.0, 0.0), na::vec3(3.0, 2.0, 4.0));
+
+    // let curve_1 = curves.add_child_curve(curve_0, t0, t1)
+}
+
+fn main_old_curve_net() {
     let mut curve_net = CurveNetwork::default();
 
     let curve_0 = curve_net.new_curve();

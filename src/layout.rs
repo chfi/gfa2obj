@@ -121,6 +121,7 @@ lazy_static::lazy_static! {
     };
 }
 
+#[derive(Default)]
 pub struct CurveLayout {
     vertices: Vec<na::Vec3>,
 
@@ -207,6 +208,64 @@ impl CurveLayout {
         let mat = rots * scale;
 
         mat
+    }
+
+    pub fn to_polylines(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
+        let sample_n = 15;
+
+        let curve_n = self.curve_endpoints.len();
+
+        let mut vertices = Vec::new();
+        let mut lines = Vec::new();
+
+        for curve_ix in 0..curve_n {
+            let (start_i, end_i) = self.curve_endpoints[curve_ix];
+
+            let p0 = self.vertices[start_i];
+            let p1 = self.vertices[end_i];
+
+            let cfn = &self.curve_fns[curve_ix];
+
+            let mat = Self::transformation_matrix(p0, p1);
+
+            let mut line = Vec::new();
+
+            let vi = vertices.len();
+
+            for i in 0..sample_n {
+                let t = (i as f32) / sample_n as f32;
+                let v = p0 + mat * cfn(t);
+
+                vertices.push(v);
+
+                line.push(vi + i);
+            }
+
+            lines.push(line);
+        }
+
+        (vertices, lines)
+    }
+
+    pub fn write_obj<W: std::io::Write>(
+        &self,
+        mut out: W,
+    ) -> anyhow::Result<()> {
+        let (vertices, lines) = self.to_polylines();
+
+        for v in vertices {
+            writeln!(out, "v {} {} {}", v.x, v.y, v.z)?;
+        }
+
+        for line in lines {
+            write!(out, "l")?;
+            for ix in line {
+                write!(out, " {}", ix)?;
+            }
+            writeln!(out)?;
+        }
+
+        Ok(())
     }
 
     /*

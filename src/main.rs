@@ -1,6 +1,9 @@
 use flexi_logger::{Duplicate, FileSpec, Logger};
 use gfa::{gfa::GFA, optfields::OptFields};
-use gfa2obj::sparse::GetVectorElementList;
+use gfa2obj::{
+    layout::{CurveFn, CurveNetwork},
+    sparse::GetVectorElementList,
+};
 #[allow(unused_imports)]
 use handlegraph::{
     handle::{Direction, Handle, NodeId},
@@ -181,7 +184,7 @@ impl VecChain {
     }
 }
 
-fn main__() {
+fn main_snn() {
     use std::time::Instant;
     let args: Args = argh::from_env();
 
@@ -524,8 +527,8 @@ impl CurveComplex {
 
             let curve = &self.curves[parent_ix];
 
+            // let new_transform = curve.transform * transform;
             let new_transform = transform * curve.transform;
-            // let new_transform = transform * curve.transform;
 
             let curve_children = self.curve_children(parent_ix);
 
@@ -543,19 +546,28 @@ impl CurveComplex {
 
                 // let origin = p0 + origin;
 
-                let v = p1 - p0;
+                let v = p0 - p1;
+
+                let nv = v.normalize();
 
                 let origin = origin + v;
 
-                let theta = (v.z).atan2(v.y);
-                let alpha = (v.x).atan2(v.z);
+                let theta = (v.z).atan2(v.x);
+                let alpha = (v.x).atan2(v.y);
 
-                let local = new_transform * rot_yz(alpha) * rot_xz(theta);
+                let local = rot_yz(alpha) * rot_xz(theta) * new_transform;
+                // let local = new_transform * rot_yz(alpha) * rot_xz(theta);
                 // rot_yz(alpha) * rot_xz(theta) * new_transform;
 
-                let angle = (child_ix as f32) / (curve_children.len() as f32);
+                // let angle = (child_ix as f32) / (curve_children.len() as f32);
 
-                let local = rot_xz(angle * std::f32::consts::TAU) * local;
+                // let local = rot_xz(angle * std::f32::consts::TAU) * local;
+
+                // let local_fn = Arc::new(move |t: f32| {
+                let local_fn = move |t: f32| {
+                    let v = curve_fn(t);
+                    local * v
+                };
                 // rot_xz(angle * std::f32::consts::TAU) * new_transform;
                 // let local =
                 //     new_transform * rot_yz(angle * std::f32::consts::TAU);
@@ -563,7 +575,7 @@ impl CurveComplex {
                 Self::write_single_curve(
                     &mut out,
                     &mut offset,
-                    curve_fn,
+                    local_fn,
                     origin,
                     Some(local),
                 )?;
@@ -894,35 +906,109 @@ fn main_test() {
 }
 
 fn main() {
-    let mut sampler = LineSampler::from_min_vertex_count(3);
+    let mut curve_net = CurveNetwork::default();
+
+    let curve_0 = curve_net.new_curve();
+    let curve_1 = curve_net.new_curve();
+    let curve_2 = curve_net.new_curve();
+
+    let curve_3 = curve_net.new_curve();
+    // let curve_3 = curve_net.new_curve();
+
+    let v0 = curve_net.new_vertex();
+    let v1 = curve_net.new_vertex();
+    let v2 = curve_net.new_vertex();
+
+    let v3 = curve_net.new_vertex();
+    let v4 = curve_net.new_vertex();
+
+    // curve
+
+    curve_net.set_vertex(v0, na::zero());
+    curve_net.set_vertex(v1, na::vec3(0.0, 0.0, 10.0));
+    curve_net.set_vertex(v2, na::vec3(10.0, 0.0, 0.0));
+    // curve_net.set_vertex(v1, na::vec3(0.0, 10.0, 0.0));
+
+    /*
+    let v2 = curve_net.new_vertex();
+    let v3 = curve_net.new_vertex();
+
+    let v4 = curve_net.new_vertex();
+
+    let sin_curve = Arc::new(|t: f32| {
+        let y = (t * std::f32::consts::PI).sin();
+        na::vec3(0.0, y, t)
+    }) as CurveFn;
+
+    curve_net.set_curve_fn(curve_0, sin_curve.clone());
+
+    curve_net.set_vertex(v2, sin_curve(0.3));
+    curve_net.set_vertex(v3, sin_curve(0.5));
+    // curve_net.set_vertex(v3, na::vec3(2.0, 7.0, 2.0));
+    curve_net.set_vertex(v4, sin_curve(0.7));
+
+    curve_net.set_curve_fn(curve_1, sin_curve.clone());
+    */
+
+    // curve_net.set_vertex(v0, na::zero());
+    // curve_net.set_vertex(v2, na::vec3(3.0, 3.0, 0.0));
+    // curve_net.set_vertex(v3, na::vec3(0.0, 7.0, 0.0));
+    // curve_net.set_vertex(v4, na::vec3(1.0, 5.0, 5.0));
+
+    let (s0, e0) = curve_net.curve_endpoints(curve_0);
+    curve_net.assign(s0, v0);
+    curve_net.assign(e0, v1);
+
+    let (s1, e1) = curve_net.curve_endpoints(curve_1);
+    curve_net.assign(s1, v1);
+    curve_net.assign(e1, v2);
+
+    let (s2, e2) = curve_net.curve_endpoints(curve_2);
+    curve_net.assign(s2, v2);
+    curve_net.assign(e2, v0);
+
+    eprintln!("v0 - {}", curve_net.get_vx(v0));
+    eprintln!("v1 - {}", curve_net.get_vx(v1));
+    eprintln!("v2 - {}", curve_net.get_vx(v2));
+    // eprintln!("v3 - {}", curve_net.get_vx(v3));
+    // eprintln!("v4 - {}", curve_net.get_vx(v4));
+
+    let stdout = std::io::stdout();
+    curve_net.write_obj(stdout).unwrap();
+
+    // curve_net.set_vertex(i, new)
+
+    // let v0 = curve_net.
+
+    // let mut sampler = LineSampler::from_min_vertex_count(3);
+
+    // // for (i, v) in sampler.offsets.iter().enumerate() {
+    // //     println!("{} - {}", i, v);
+    // // }
+
+    // for i in 0..=19 {
+    //     let t = (i as f32) / 19.0;
+
+    //     println!("{} - {} -> {}", i, t, sampler.sample(t));
+    // }
+
+    // println!("--------------------");
+
+    // // sampler.push_samples([0.111222, 0.222111, 0.621212].into_iter());
+    // sampler.push_samples([0.111222, 0.222111, 0.921212].into_iter());
 
     // for (i, v) in sampler.offsets.iter().enumerate() {
     //     println!("{} - {}", i, v);
     // }
 
-    for i in 0..=19 {
-        let t = (i as f32) / 19.0;
+    // println!("---------------------");
 
-        println!("{} - {} -> {}", i, t, sampler.sample(t));
-    }
+    // for i in 0..=19 {
+    //     let t = (i as f32) / 19.0;
 
-    println!("--------------------");
-
-    // sampler.push_samples([0.111222, 0.222111, 0.621212].into_iter());
-    sampler.push_samples([0.111222, 0.222111, 0.921212].into_iter());
-
-    for (i, v) in sampler.offsets.iter().enumerate() {
-        println!("{} - {}", i, v);
-    }
-
-    println!("---------------------");
-
-    for i in 0..=19 {
-        let t = (i as f32) / 19.0;
-
-        // println!("{} - {} -> {}", i, t, sampler.sample_rank(t));
-        println!("{} - {} -> {}", i, t, sampler.sample(t));
-    }
+    //     // println!("{} - {} -> {}", i, t, sampler.sample_rank(t));
+    //     println!("{} - {} -> {}", i, t, sampler.sample(t));
+    // }
 }
 
 fn main_real() {

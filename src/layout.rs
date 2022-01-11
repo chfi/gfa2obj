@@ -114,6 +114,7 @@ lazy_static::lazy_static! {
     };
 }
 
+#[derive(Default)]
 pub struct CurveNetwork {
     pub vertices: Vec<na::Vec3>,
 
@@ -135,7 +136,7 @@ impl CurveNetwork {
         self.curve_endpoints.push((p0_, p1_));
         self.curve_fns.push(ZERO_CURVE_FN.clone());
 
-        let min_vx_count = 5;
+        let min_vx_count = 15;
 
         self.curve_samples
             .push(LineSampler::from_min_vertex_count(min_vx_count));
@@ -154,16 +155,43 @@ impl CurveNetwork {
         let start = self.read_vx_var(s)?;
         let end = self.read_vx_var(e)?;
 
-        let len = (end - start).norm();
+        #[rustfmt::skip]
+        let rot_xy = |d: f32| na::mat3(d.cos(), -d.sin(), 0.0,
+                                       d.sin(),  d.cos(), 0.0,
+                                       0.0,         0.0,  1.0);
+
+        #[rustfmt::skip]
+        let rot_xz = |d: f32| na::mat3(d.cos(), 0.0, -d.sin(),
+                                       0.0,     1.0,      0.0,
+                                       d.sin(), 0.0,  d.cos());
+
+        #[rustfmt::skip]
+        let rot_yz = |d: f32| na::mat3(1.0,     0.0,      0.0,
+                                       0.0, d.cos(), -d.sin(),
+                                       0.0, d.sin(),  d.cos());
+
+        let del = end - start;
+
+        let rot = rot_yz(del.y.atan2(del.z)) * rot_xz(del.z.atan2(del.x));
+
+        let len = del.norm();
 
         #[rustfmt::skip]
         let mat = na::mat3(1.0, 0.0, 0.0,
                            0.0, 1.0, 0.0,
                            0.0, 0.0, len);
 
+        let mat = mat * rot;
+        // let mat = mat * rot;
+        // let mat = mat * rot.transpose();
+
         let pre = (self.curve_fns[curve.0])(t);
 
-        Some(mat * pre)
+        // let pre =
+
+        let out = start + (mat * pre);
+
+        Some(out)
     }
 
     pub fn curve_endpoints(&self, curve: CurveId) -> (VxVar, VxVar) {
@@ -199,6 +227,10 @@ impl CurveNetwork {
         }
     }
 
+    pub fn get_vx(&self, v: VxId) -> na::Vec3 {
+        self.vertices[v.0]
+    }
+
     pub fn read_vx_var(&self, var: VxVar) -> Option<na::Vec3> {
         let ix = *self.vertex_variables.get(var.0)?;
         let ix = ix?;
@@ -226,16 +258,59 @@ impl CurveNetwork {
                 continue;
             }
 
+            let v0 = self.read_vx_var(start).unwrap_or_default();
+            let v1 = self.read_vx_var(end).unwrap_or_default();
+
+            let mut cur_line = Vec::new();
+            // let sampler = &self.curve_samples[curve_ix];
+
+            let i = vertices.len() + 1;
+
+            cur_line.push(i);
+            cur_line.push(i + 1);
+
+            vertices.push(v0);
+            vertices.push(v1);
+
+            lines.push(cur_line);
+        }
+
+        (vertices, lines)
+    }
+
+    /*
+    pub fn reify(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
+        let curve_n = self.curve_endpoints.len();
+
+        let mut vertices = Vec::new();
+        let mut lines = Vec::new();
+
+        for curve_ix in 0..curve_n {
+            let (start, end) = self.curve_endpoints[curve_ix];
+
+            // only reify curves with actual vertex endpoints
+            if !self.is_assigned(start) || !self.is_assigned(end) {
+                continue;
+            }
+
             let mut cur_line = Vec::new();
 
-            let curve_fn = &self.curve_fns[curve_ix];
+            // let curve_fn = &self.curve_fns[curve_ix];
             let sampler = &self.curve_samples[curve_ix];
             // let mat = &self.curve_transforms[curve_ix];
 
             let ts = sampler.sample_points();
 
+            let p0 = self.sample_curve(CurveId(curve_ix), 0.0).unwrap();
+
             for &t in ts {
-                let p = curve_fn(t);
+                let p = self.sample_curve(CurveId(curve_ix), t).unwrap();
+
+                let del = p - p0;
+
+                let p = del + p;
+
+                // let p = curve_fn(t);
                 let i = vertices.len();
                 vertices.push(p);
                 cur_line.push(i + 1);
@@ -246,6 +321,7 @@ impl CurveNetwork {
 
         (vertices, lines)
     }
+    */
 
     pub fn write_obj<W: std::io::Write>(
         &self,

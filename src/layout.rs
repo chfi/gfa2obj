@@ -119,6 +119,21 @@ lazy_static::lazy_static! {
         let f = |t: f32| na::vec3(0.0, 0.0, t);
         Arc::new(f)
     };
+
+    static ref TRIANGLE_CURVE_FN: CurveFn = {
+        let f = |t: f32| {
+            let y =
+            if t <= 0.5 {
+                t
+            } else {
+                1.0 - t
+            };
+
+            na::vec3(0.0, y, t)
+        };
+
+        Arc::new(f)
+    };
 }
 
 #[derive(Default)]
@@ -139,7 +154,8 @@ impl CurveLayout {
         self.vertices.push(p1);
 
         self.curve_endpoints.push((vi, vi + 1));
-        self.curve_fns.push(ZERO_CURVE_FN.clone());
+        self.curve_fns.push(TRIANGLE_CURVE_FN.clone());
+        // self.curve_fns.push(ZERO_CURVE_FN.clone());
 
         CurveId(i)
     }
@@ -162,6 +178,8 @@ impl CurveLayout {
         let c_t0 = p_p0 + parent_mat * cfn(t0);
         let c_t1 = p_p0 + parent_mat * cfn(t1);
 
+        eprintln!("adding child from {} to {}", c_t0, c_t1);
+
         let child_i = self.curve_endpoints.len();
 
         let vi = self.vertices.len();
@@ -169,7 +187,7 @@ impl CurveLayout {
         self.vertices.push(c_t1);
 
         self.curve_endpoints.push((vi, vi + 1));
-        self.curve_fns.push(ZERO_CURVE_FN.clone());
+        self.curve_fns.push(TRIANGLE_CURVE_FN.clone());
 
         CurveId(child_i)
     }
@@ -196,7 +214,7 @@ impl CurveLayout {
         let theta = cdel.z.atan2(cdel.x);
         let alpha = cdel.y.atan2(cdel.z);
 
-        let z_scale = p1.metric_distance(&p1);
+        let z_scale = p0.metric_distance(&p1);
 
         let rots = rot_yz(alpha) * rot_xz(theta);
 
@@ -211,7 +229,7 @@ impl CurveLayout {
     }
 
     pub fn to_polylines(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
-        let sample_n = 15;
+        let sample_n = 25;
 
         let curve_n = self.curve_endpoints.len();
 
@@ -232,9 +250,11 @@ impl CurveLayout {
 
             let vi = vertices.len();
 
-            for i in 0..sample_n {
+            for i in 0..=sample_n {
                 let t = (i as f32) / sample_n as f32;
                 let v = p0 + mat * cfn(t);
+                // let v = p0 + cfn(t);
+                // let v = mat * cfn(t)
 
                 vertices.push(v);
 
@@ -258,35 +278,28 @@ impl CurveLayout {
         }
 
         for line in lines {
+            for win in line.windows(2) {
+                if let &[a, b] = win {
+                    // for [a, b] in line.as_chunks()
+                    writeln!(out, "l {} {}", a + 1, b + 1)?;
+                }
+            }
+            // for (a, ) in line.iter().zip(line.iter().skip(1)) {
+            // }
+        }
+
+        /*
+        for line in lines {
             write!(out, "l")?;
             for ix in line {
-                write!(out, " {}", ix)?;
+                write!(out, " {}", ix + 1)?;
             }
             writeln!(out)?;
         }
+        */
 
         Ok(())
     }
-
-    /*
-    pub fn reify(&self) -> (Vec<na::Vec3>, Vec<Vec<usize>>) {
-        let curve_n = self.curve_endpoints.len();
-
-        let mut vertices = Vec::new();
-        let mut lines = Vec::new();
-
-        for curve_ix in 0..curve_n {
-            let (start_i, end_i) = self.curve_endpoints[curve_ix];
-
-            let p0 = self.vertices[start_i];
-            let p1 = self.vertices[end_i];
-
-            let mat = Self::transformation_matrix(p0, p1);
-
-            // let translation = na::translation(p0);
-        }
-    }
-    */
 }
 
 #[derive(Default)]

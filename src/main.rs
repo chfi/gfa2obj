@@ -911,7 +911,11 @@ fn main() {
     let curve_0 =
         curves.new_curve(na::vec3(0.0, 0.0, 0.0), na::vec3(3.0, 2.0, 4.0));
 
-    // let curve_1 = curves.add_child_curve(curve_0, t0, t1)
+    let curve_1 = curves.add_child_curve(curve_0, 0.3, 0.6);
+    let curve_2 = curves.add_child_curve(curve_0, 0.2, 0.3);
+
+    let stdout = std::io::stdout();
+    curves.write_obj(stdout).unwrap();
 }
 
 fn main_old_curve_net() {
